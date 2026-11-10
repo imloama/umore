@@ -1,0 +1,28 @@
+{
+  "database": {
+    "driver": "postgres",
+    "dsn": "postgres://umore:umore@127.0.0.1:5432/umore?sslmode=disable",
+    "max_open_conns": 20,
+    "max_idle_conns": 10,
+    "conn_max_lifetime_minutes": 30
+  },
+  "redis": {
+    "addr": "127.0.0.1:6379",
+    "password": "",
+    "db": 0,
+    "prefix": "umore",
+    "dial_timeout_seconds": 3
+  },
+  "auth": {
+    "token_ttl_hours": 168
+  },
+  "resend": {
+    "api_key": "re_xxxxxxxxxxxxxxxxxxxxxx",
+    "from": "umore <no-reply@your-domain.com>",
+    "log_only": false,
+    "code_length": 6,
+    "code_ttl_minutes": 10,
+    "resend_interval_seconds": 60,
+    "max_attempts": 5
+  }
+}

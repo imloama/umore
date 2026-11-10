@@ -1,0 +1,21 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+backend/data/*.db-journal
+backend/web/
+backend/data/
+backend/data/uploads/
+frontend/dist/
+backend/umore
+backend/umore.exe
+backend/server
+backend/umore-migrate
+
+# 本地配置里有数据库密码与 Resend API key，不进仓库；模板见 backend/config.example.json
+config.json
+backend/config.json
+# Docker Compose 的本地覆盖配置（.env 里可能放密钥）
+.env
+.env.local
+docker-compose.override.yml

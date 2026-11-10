@@ -1,0 +1,183 @@
+@import 'tailwindcss';
+
+/* shadcn 的 token 约定：:root 存 HSL 分量，@theme 里映射成 Tailwind 颜色 */
+@theme inline {
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-sidebar: hsl(var(--sidebar));
+  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
+
+  /* 任务类型 / 状态用的语义色 */
+  --color-todo: hsl(var(--todo));
+  --color-issue: hsl(var(--issue));
+  --color-requirement: hsl(var(--requirement));
+  --color-opportunity: hsl(var(--opportunity));
+  --color-success: hsl(var(--success));
+  --color-warning: hsl(var(--warning));
+
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+}
+
+:root {
+  --background: 210 40% 98%;
+  --foreground: 222 47% 11%;
+
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+
+  --primary: 221 83% 53%;
+  --primary-foreground: 0 0% 100%;
+
+  --secondary: 210 40% 96%;
+  --secondary-foreground: 222 47% 20%;
+
+  --muted: 210 40% 96%;
+  --muted-foreground: 215 16% 47%;
+
+  --accent: 214 95% 96%;
+  --accent-foreground: 221 83% 45%;
+
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 100%;
+
+  --border: 214 32% 91%;
+  --input: 214 32% 89%;
+  --ring: 221 83% 66%;
+
+  --sidebar: 0 0% 100%;
+  --sidebar-foreground: 215 16% 37%;
+
+  --todo: 221 83% 53%;
+  --issue: 0 72% 51%;
+  --requirement: 32 95% 44%;
+  --opportunity: 271 81% 56%;
+  --success: 152 60% 36%;
+  --warning: 32 95% 44%;
+
+  --radius: 0.65rem;
+}
+
+@layer base {
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    margin: 0;
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-family: var(--font-sans);
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  ::selection {
+    background: hsl(var(--accent));
+    color: hsl(var(--accent-foreground));
+  }
+}
+
+/* 细滚动条，跟 shadcn 的克制风格一致 */
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 999px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* ---- 富文本 ---- */
+.rich-text {
+  min-width: 0;
+  font-size: 13.5px;
+  line-height: 1.75;
+  color: hsl(var(--foreground));
+  overflow-wrap: anywhere;
+}
+.rich-text > *:first-child { margin-top: 0; }
+.rich-text > *:last-child { margin-bottom: 0; }
+.rich-text p { margin: 0 0 0.6em; }
+.rich-text h1, .rich-text h2, .rich-text h3, .rich-text h4 {
+  margin: 0.9em 0 0.4em;
+  line-height: 1.35;
+  font-weight: 600;
+}
+.rich-text h1 { font-size: 19px; }
+.rich-text h2 { font-size: 16px; }
+.rich-text h3 { font-size: 14.5px; }
+.rich-text ul, .rich-text ol { margin: 0 0 0.6em; padding-left: 1.4em; }
+.rich-text ul { list-style: disc; }
+.rich-text ol { list-style: decimal; }
+.rich-text li { margin: 2px 0; }
+/* Markdown 待办项：不要项目符号，勾选框顶到行首 */
+.rich-text ul.task-list { list-style: none; padding-left: 0.2em; }
+.rich-text ul.task-list li.task-item { color: hsl(var(--foreground)); }
+.rich-text ul.task-list li.task-item.is-done { color: hsl(var(--muted-foreground)); }
+.rich-text blockquote {
+  margin: 0 0 0.6em;
+  padding: 0.4em 0.9em;
+  border-left: 3px solid hsl(var(--border));
+  background: hsl(var(--muted));
+  border-radius: 0 6px 6px 0;
+  color: hsl(var(--muted-foreground));
+}
+.rich-text code {
+  background: hsl(var(--muted));
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 12.5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.rich-text pre {
+  max-width: 100%;
+  background: hsl(222 47% 11%);
+  color: hsl(210 40% 96%);
+  border-radius: 8px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  margin: 0 0 0.7em;
+}
+.rich-text pre code { background: none; color: inherit; padding: 0; font-size: 12.5px; }
+.rich-text a { color: hsl(var(--primary)); text-decoration: none; }
+.rich-text a:hover { text-decoration: underline; }
+.rich-text img { max-width: 100%; border-radius: 6px; margin: 4px 0; }
+.rich-text del { color: hsl(var(--muted-foreground)); }
