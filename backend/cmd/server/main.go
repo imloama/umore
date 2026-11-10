@@ -2,10 +2,15 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"net/http"
 	"os"
+	"os/signal"
+	"path"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/imloama/umore/internal/auth"
@@ -74,6 +79,17 @@ func main() {
 
 	// 初始化Gin
 	r := gin.Default()
+	// 只信任本机/指定入口的 X-Forwarded-For，否则谁都能在日志里冒充来源 IP。
+	// 放在 nginx 后面时按需改成它的网段，见 UMORE_TRUSTED_PROXIES。
+	if err := r.SetTrustedProxies(trustedProxies()); err != nil {
+		log.Printf("WARN: 解析 UMORE_TRUSTED_PROXIES 失败，退回只信任本机: %v", err)
+		_ = r.SetTrustedProxies([]string{"127.0.0.1", "::1"})
+	}
+
+	// 探活用：只看进程还活着，不碰数据库和缓存，免得探针把依赖打挂
+	r.GET("/healthz", func(c *gin.Context) {
+		c.String(http.StatusOK, "ok")
+	})
 
 	// CORS配置
 	r.Use(cors.New(cors.Config{
@@ -202,15 +218,44 @@ func main() {
 
 	// 前端构建产物存在时一并托管，单进程即可部署（前后端同源，不用再配 CORS/代理）
 	if indexPath := filepath.Join(webDir, "index.html"); fileExists(indexPath) {
+		// assets 带内容 hash，可以永远缓存；index.html 必须每次回源校验，
+		// 否则发版后浏览器拿着旧首页去拉已被删掉的旧 chunk，直接白屏。
+		r.Use(func(c *gin.Context) {
+			if strings.HasPrefix(c.Request.URL.Path, "/assets/") {
+				c.Header("Cache-Control", "public, max-age=31536000, immutable")
+			}
+			c.Next()
+		})
 		r.Static("/assets", filepath.Join(webDir, "assets"))
-		r.StaticFile("/vite.svg", filepath.Join(webDir, "vite.svg"))
+
 		serveIndex := func(c *gin.Context) {
-			// 静态资源和 API 已经匹配过，剩下的路径一律交给前端路由
+			c.Header("Cache-Control", "no-cache")
 			c.File(indexPath)
 		}
+
 		r.NoRoute(func(c *gin.Context) {
-			if strings.HasPrefix(c.Request.URL.Path, "/api") {
-				c.JSON(404, gin.H{"error": "not found"})
+			p := c.Request.URL.Path
+			// API 没匹配上就是真 404，别让前端页面把错误吃掉
+			if p == "/api" || strings.HasPrefix(p, "/api/") {
+				c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+				return
+			}
+			// 前端路由只有 GET/HEAD 有意义
+			if c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead {
+				c.Status(http.StatusNotFound)
+				return
+			}
+			// 根目录下的真实文件（favicon.svg、robots.txt…）直接发，不用逐个注册
+			if clean := path.Clean(p); clean != "/" {
+				if info, err := os.Stat(filepath.Join(webDir, clean)); err == nil && !info.IsDir() {
+					c.File(filepath.Join(webDir, clean))
+					return
+				}
+			}
+			// 长得像静态资源却没命中：必须 404。
+			// 这里若回 index.html，浏览器会拿到 200 text/html，再报 MIME 类型错误，很难查。
+			if strings.HasPrefix(p, "/assets/") || strings.HasPrefix(p, "/uploads/") || path.Ext(p) != "" {
+				c.Status(http.StatusNotFound)
 				return
 			}
 			serveIndex(c)
@@ -219,12 +264,61 @@ func main() {
 	} else {
 		log.Printf("Frontend bundle not found at %s, API only", indexPath)
 	}
+	port := 8384
+	if cfg.Port != 0 {
+		port = cfg.Port
+	}
+	addr := fmt.Sprintf(":%d", port) // +  //envOr("UMORE_PORT", "8080")
+	srv := &http.Server{
+		Addr:    addr,
+		Handler: r,
+		// 没有 ReadHeaderTimeout 就等着被慢速连接占满；
+		// 其余超时按「10MB 附件的慢速上传」放够余量。
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       120 * time.Second,
+		WriteTimeout:      120 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
 
-	addr := ":" + envOr("PORT", "8080")
+	// 收到 SIGTERM/SIGINT 先停止收新请求，给手上的请求 15 秒收尾；
+	// 发版时直接 kill 会把正在保存的请求断掉。
+	go func() {
+		quit := make(chan os.Signal, 1)
+		signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+		<-quit
+		log.Printf("Shutting down ...")
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(ctx); err != nil {
+			log.Printf("Shutdown error: %v", err)
+		}
+	}()
+
 	log.Printf("Server starting on %s", addr)
-	if err := r.Run(addr); err != nil {
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("Failed to start server: %v", err)
 	}
+	log.Printf("Server stopped")
+}
+
+// trustedProxies 只有列在这里的地址发来的 X-Forwarded-For 才认。
+// 默认只信本机（nginx 和 umore 同机部署），多机时用逗号分隔配置。
+func trustedProxies() []string {
+	raw := strings.TrimSpace(os.Getenv("UMORE_TRUSTED_PROXIES"))
+	if raw == "" {
+		return []string{"127.0.0.1", "::1"}
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return []string{"127.0.0.1", "::1"}
+	}
+	return out
 }
 
 // openDatabase 按配置打开数据库；SQLite 没给路径时落到 dataDir 下的 umore.db

@@ -15,6 +15,7 @@ import (
 
 // Config 整份配置。
 type Config struct {
+	Port     int      `json:"port"`
 	Database Database `json:"database"`
 	Redis    Redis    `json:"redis"`
 	Auth     Auth     `json:"auth"`

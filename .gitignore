@@ -11,7 +11,7 @@ backend/umore
 backend/umore.exe
 backend/server
 backend/umore-migrate
-
+backend/bin
 # 本地配置里有数据库密码与 Resend API key，不进仓库；模板见 backend/config.example.json
 config.json
 backend/config.json
