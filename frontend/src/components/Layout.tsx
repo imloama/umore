@@ -25,6 +25,7 @@ import QuickCreate from './QuickCreate'
 import LanguageSwitcher from './LanguageSwitcher'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import Logo from './Logo'
 
 interface NavItem {
   path: string
@@ -114,9 +115,7 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
       >
         <div className="flex h-14 items-center justify-between border-b border-border px-4">
           <Link to="/" className="flex items-center gap-2.5">
-            <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-sm font-bold text-primary-foreground shadow-sm">
-              u
-            </span>
+            <Logo />
             <span className="min-w-0">
               <span className="block text-[15px] font-semibold leading-tight tracking-tight">umore</span>
               <span className="block text-[10px] leading-tight text-muted-foreground">{t('common.appTagline')}</span>

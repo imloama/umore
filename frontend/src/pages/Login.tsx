@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
+import Logo from '@/components/Logo'
 
 interface LoginProps {
   /** 库里已有账号：默认停在登录，否则默认停在注册 */
@@ -129,9 +130,7 @@ export default function Login({ hasUsers, onAuth }: LoginProps) {
 
       <div className="relative w-full max-w-[380px]">
         <div className="mb-6 flex items-center gap-2.5">
-          <span className="flex size-9 items-center justify-center rounded-lg bg-primary text-base font-bold text-primary-foreground shadow-sm">
-            u
-          </span>
+          <Logo className="size-9" />
           <div>
             <div className="text-[17px] font-semibold leading-tight tracking-tight">umore</div>
             <div className="text-[11px] leading-tight text-muted-foreground">{t('common.appTagline')}</div>
