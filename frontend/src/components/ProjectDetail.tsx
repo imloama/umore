@@ -6,6 +6,7 @@ import RichText from './RichText'
 import RichTextEditor, { type QuickInsert } from './RichTextEditor'
 import ReceivableForm from './ReceivableForm'
 import ReceivableList from './ReceivableList'
+import { useI18n } from '@/i18n'
 import { money, sumAmounts } from './receivableMeta'
 import { formatTime } from './TaskDetail'
 import { Badge } from '@/components/ui/badge'
@@ -18,12 +19,6 @@ import { cn } from '@/lib/utils'
 import { formatHours } from './taskMeta'
 
 const draftOf = (n?: number) => (n ? String(Math.round(n * 100) / 100) : '')
-
-const COMMENT_TEMPLATES: QuickInsert[] = [
-  { label: '变更', text: '**变更**：客户加了一个 XXX，工期顺延 X 天' },
-  { label: '问题', text: '**问题**：\n\n> 描述 + 影响范围' },
-  { label: '收款', text: '**收款**：已收 XXX，剩余 XXX' }
-]
 
 /**
  * 项目详情：一层 tab 分开「概览 / 收款计划 / 金额变更 / 项目记录」。
@@ -41,6 +36,12 @@ export default function ProjectDetail({
   /** 从回款页点进来时直接落到收款计划那一页 */
   initialTab?: string
 }) {
+  const { t } = useI18n()
+  const commentTemplates: QuickInsert[] = [
+    { label: t('project.detail.tpl.change'), text: t('project.detail.tpl.changeText') },
+    { label: t('project.detail.tpl.issue'), text: t('project.detail.tpl.issueText') },
+    { label: t('project.detail.tpl.receipt'), text: t('project.detail.tpl.receiptText') }
+  ]
   const [tab, setTab] = useState('overview')
   const [changes, setChanges] = useState<ProjectAmountChange[]>([])
   const [comments, setComments] = useState<TaskComment[]>([])
@@ -53,8 +54,10 @@ export default function ProjectDetail({
   const [error, setError] = useState('')
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState<Receivable | null>(null)
+  const [fresh, setFresh] = useState<Project | null>(null)
 
   useEffect(() => {
+    setFresh(null)
     if (!project?.id) {
       setChanges([])
       setComments([])
@@ -90,15 +93,25 @@ export default function ProjectDetail({
     setReceivables(list || [])
   }
 
+  // 弹窗里的 project 是父页面的快照，收款变化后单独取一份最新的，概览才跟着动
+  const reloadProject = async () => {
+    if (!project?.id) return
+    try {
+      setFresh(await projectApi.get(project.id))
+    } catch (err) {
+      console.error('Failed to reload project:', err)
+    }
+  }
+
   const submitAmount = async () => {
     if (!project?.id) return
     const next = parseFloat(amountDraft)
     if (!Number.isFinite(next) || next < 0) {
-      setError('金额要填个非负数字')
+      setError(t('project.detail.amountInvalid'))
       return
     }
     if (next === (project.amount || 0)) {
-      setError('金额没变，不用记录')
+      setError(t('project.detail.amountUnchanged'))
       return
     }
     setSaving(true)
@@ -110,12 +123,13 @@ export default function ProjectDetail({
         projectApi.get(project.id)
       ])
       setChanges(changeList || [])
+      setFresh(reloaded)
       setAmountDraft(draftOf(reloaded.amount))
       setReasonDraft('')
       onChanged?.()
     } catch (err) {
       console.error('Failed to add amount change:', err)
-      setError('保存失败')
+      setError(t('project.detail.saveFailed'))
     } finally {
       setSaving(false)
     }
@@ -123,7 +137,7 @@ export default function ProjectDetail({
 
   const removeChange = async (changeId?: number) => {
     if (!changeId || !project?.id) return
-    if (!confirm('删掉这条变更记录？项目总金额不会回滚。')) return
+    if (!confirm(t('project.detail.confirmDeleteChange'))) return
     await projectApi.removeAmountChange(changeId)
     const list = await projectApi.amountChanges(project.id)
     setChanges(list || [])
@@ -147,23 +161,27 @@ export default function ProjectDetail({
     setComments(prev => prev.filter(c => c.id !== commentId))
   }
 
+  // 勾已收会同时落一笔收入流水，项目的「已收款」得重新拉一次，
+  // 只刷收款计划列表的话概览上的数字还停在旧值。
   const toggleDone = async (item: Receivable) => {
     if (!item.id) return
     await receivableApi.setDone(item.id, item.status !== 'done')
-    await reloadReceivables()
+    await Promise.all([reloadReceivables(), reloadProject()])
     onChanged?.()
   }
 
   const removeReceivable = async (item: Receivable) => {
     if (!item.id) return
-    if (!confirm(`删掉「${item.title}」这笔待收？`)) return
+    if (!confirm(t('project.detail.confirmDeleteReceivable', { title: item.title }))) return
     await receivableApi.remove(item.id)
-    await reloadReceivables()
+    await Promise.all([reloadReceivables(), reloadProject()])
     onChanged?.()
   }
 
-  const amount = project?.amount || 0
-  const received = project?.received || 0
+  // 汇总字段用刚拉回来的那份，其余仍听父页面传的 project
+  const view = fresh && fresh.id === project?.id ? fresh : project
+  const amount = view?.amount || 0
+  const received = view?.received || 0
   const unpaid = Math.max(0, amount - received)
   // 收的比合同还多：不是欠款，是超收，得单独说一句，不能只显示「未收 ¥0」
   const overReceived = amount > 0 && received > amount
@@ -180,28 +198,28 @@ export default function ProjectDetail({
         project && (
           <span className="flex flex-wrap items-center gap-2">
             <span>{project.name}</span>
-            {project.status === 'archived' && <Badge variant="muted">已归档</Badge>}
+            {project.status === 'archived' && <Badge variant="muted">{t('project.archived')}</Badge>}
             {project.customer && <Badge variant="outline">{project.customer}</Badge>}
           </span>
         )
       }
-      description={project?.description || '金额、收款计划、变更记录都在这张单上。'}
-      footer={<Button variant="outline" onClick={onClose}>关闭</Button>}
+      description={project?.description || t('project.detail.description')}
+      footer={<Button variant="outline" onClick={onClose}>{t('common.close')}</Button>}
     >
       {project && (
         <Tabs value={tab} onValueChange={setTab}>
           <TabsList>
-            <TabsTrigger value="overview">概览</TabsTrigger>
+            <TabsTrigger value="overview">{t('project.detail.overview')}</TabsTrigger>
             <TabsTrigger value="receivables">
-              收款计划
+              {t('project.detail.receivables')}
               <span className="text-[11px] font-normal text-muted-foreground">{pendingReceivable.length}</span>
             </TabsTrigger>
             <TabsTrigger value="changes">
-              金额变更
+              {t('project.detail.changes')}
               <span className="text-[11px] font-normal text-muted-foreground">{changes.length}</span>
             </TabsTrigger>
             <TabsTrigger value="records">
-              项目记录
+              {t('project.detail.records')}
               <span className="text-[11px] font-normal text-muted-foreground">{comments.length}</span>
             </TabsTrigger>
           </TabsList>
@@ -210,23 +228,23 @@ export default function ProjectDetail({
           <TabsContent value="overview" className="space-y-4">
             <div className="grid gap-2 sm:grid-cols-3">
               <div className="rounded-lg border border-border px-3 py-2.5">
-                <div className="text-[11px] text-muted-foreground">合同总金额</div>
+                <div className="text-[11px] text-muted-foreground">{t('project.detail.contractAmount')}</div>
                 <div className="tabular mt-1 text-[17px] font-semibold">{money(amount)}</div>
-                {!!project.amount_change_count && (
+                {!!view?.amount_change_count && (
                   <div className="mt-0.5 text-[10.5px] text-muted-foreground">
-                    变更 {project.amount_change_count} 次
-                    {project.amount_changed_at && ` · ${formatTime(project.amount_changed_at)}`}
+                    {t('project.changeCount', { n: view.amount_change_count })}
+                    {view.amount_changed_at && ` · ${formatTime(view.amount_changed_at)}`}
                   </div>
                 )}
               </div>
               <div className="rounded-lg border border-emerald-200 bg-emerald-50/40 px-3 py-2.5">
                 <div className="flex items-center gap-1 text-[11px] text-emerald-700">
                   <Wallet className="size-3" />
-                  已收款
+                  {t('project.detail.receivedAmount')}
                 </div>
                 <div className="tabular mt-1 text-[17px] font-semibold text-emerald-700">{money(received)}</div>
                 <div className="mt-0.5 text-[10.5px] text-emerald-700/80">
-                  占比 {amount > 0 ? Math.round((received / amount) * 100) : 0}%
+                  {t('project.detail.receivedRatio', { n: amount > 0 ? Math.round((received / amount) * 100) : 0 })}
                 </div>
               </div>
               <div
@@ -241,7 +259,7 @@ export default function ProjectDetail({
                     overReceived ? 'text-sky-700' : unpaid > 0 ? 'text-amber-700' : 'text-muted-foreground'
                   )}
                 >
-                  {overReceived ? '超收' : '未收'}
+                  {overReceived ? t('project.detail.overReceived') : t('project.detail.unreceived')}
                 </div>
                 <div
                   className={cn(
@@ -252,7 +270,10 @@ export default function ProjectDetail({
                   {overReceived ? money(received - amount) : money(unpaid)}
                 </div>
                 <div className="mt-0.5 text-[10.5px] text-muted-foreground">
-                  工时 {formatHours(project.actual_hours) || '0h'} / 评估 {formatHours(project.estimated_hours) || '—'}
+                  {t('project.detail.hoursLine', {
+                    actual: formatHours(view?.actual_hours) || '0h',
+                    estimate: formatHours(view?.estimated_hours) || '—'
+                  })}
                 </div>
               </div>
             </div>
@@ -260,34 +281,41 @@ export default function ProjectDetail({
             <div className="grid gap-2 sm:grid-cols-2">
               <div className="rounded-lg border border-border px-3 py-2.5">
                 <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                  <span>待收款计划</span>
-                  <Button variant="ghost" size="xs" onClick={() => setTab('receivables')}>去看</Button>
+                  <span>{t('project.detail.pendingPlan')}</span>
+                  <Button variant="ghost" size="xs" onClick={() => setTab('receivables')}>{t('project.detail.goSee')}</Button>
                 </div>
                 <div className="tabular mt-1 text-[15px] font-semibold">{money(pendingAmount)}</div>
                 <div className="mt-0.5 text-[10.5px] text-muted-foreground">
-                  {pendingReceivable.length} 笔未收
-                  {overdueAmount > 0 && <span className="ml-1 text-red-600">· 逾期 {money(overdueAmount)}</span>}
+                  {t('project.detail.pendingCount', { n: pendingReceivable.length })}
+                  {overdueAmount > 0 && (
+                    <span className="ml-1 text-red-600">{t('project.detail.overdueAmount', { amount: money(overdueAmount) })}</span>
+                  )}
                 </div>
               </div>
               <div className="rounded-lg border border-border px-3 py-2.5">
-                <div className="text-[11px] text-muted-foreground">关联任务</div>
-                <div className="tabular mt-1 text-[15px] font-semibold">{project.task_count || 0} 个</div>
+                <div className="text-[11px] text-muted-foreground">{t('project.linkedTasks')}</div>
+                <div className="tabular mt-1 text-[15px] font-semibold">
+                  {t('project.detail.linkedTaskCount', { n: view?.task_count || 0 })}
+                </div>
                 <div className="mt-0.5 text-[10.5px] text-muted-foreground">
-                  {formatHours(project.actual_hours) || '0h'} 已投入
+                  {t('project.detail.investedHours', { hours: formatHours(view?.actual_hours) || '0h' })}
                 </div>
               </div>
             </div>
 
-            {loading && <p className="text-xs text-muted-foreground">加载中…</p>}
+            {loading && <p className="text-xs text-muted-foreground">{t('common.loading')}</p>}
           </TabsContent>
 
           {/* 收款计划：下一级就是每一笔的编辑 */}
           <TabsContent value="receivables" className="space-y-3">
             <div className="flex items-center justify-between">
               <div className="text-[12px] text-muted-foreground">
-                未收 <span className="tabular font-semibold text-amber-700">{money(pendingAmount)}</span>
+                {t('project.detail.unreceived')}{' '}
+                <span className="tabular font-semibold text-amber-700">{money(pendingAmount)}</span>
                 {overdueAmount > 0 && (
-                  <span className="ml-2 text-red-600">逾期 <span className="tabular">{money(overdueAmount)}</span></span>
+                  <span className="ml-2 text-red-600">
+                    {t('project.detail.overdueAmount', { amount: money(overdueAmount) })}
+                  </span>
                 )}
               </div>
               <Button
@@ -298,7 +326,7 @@ export default function ProjectDetail({
                 }}
               >
                 <Plus />
-                记一笔待收
+                {t('project.detail.addReceivable')}
               </Button>
             </div>
 
@@ -313,7 +341,7 @@ export default function ProjectDetail({
               onDelete={removeReceivable}
             />
             <p className="text-[11px] text-muted-foreground">
-              点某一笔可以改备注、金额、到期时间；勾上圆圈就是收到了。
+              {t('project.detail.receivableHint')}
             </p>
           </TabsContent>
 
@@ -322,7 +350,7 @@ export default function ProjectDetail({
             <div className="rounded-lg border border-border bg-secondary/30 p-2.5">
               <div className="grid gap-2 sm:grid-cols-[130px_1fr_auto]">
                 <div>
-                  <Label className="text-[11px]">调整后总金额</Label>
+                  <Label className="text-[11px]">{t('project.detail.adjustAmount')}</Label>
                   <Input
                     type="number"
                     step="0.01"
@@ -333,18 +361,18 @@ export default function ProjectDetail({
                   />
                 </div>
                 <div>
-                  <Label className="text-[11px]">变更说明</Label>
+                  <Label className="text-[11px]">{t('project.detail.changeReason')}</Label>
                   <Input
                     value={reasonDraft}
                     onChange={e => setReasonDraft(e.target.value)}
-                    placeholder="客户加了一个模块 / 砍掉一部分需求"
+                    placeholder={t('project.detail.changeReasonPlaceholder')}
                     className="h-8"
                   />
                 </div>
                 <div className="flex items-end">
                   <Button size="sm" onClick={submitAmount} disabled={saving}>
                     <Plus />
-                    记一笔变更
+                    {t('project.detail.addChange')}
                   </Button>
                 </div>
               </div>
@@ -352,7 +380,7 @@ export default function ProjectDetail({
             </div>
 
             {changes.length === 0 ? (
-              <p className="text-xs text-muted-foreground">还没有金额变更。中途加需求、砍范围，都在这儿记一笔。</p>
+              <p className="text-xs text-muted-foreground">{t('project.detail.noChanges')}</p>
             ) : (
               <ul className="space-y-1.5">
                 {changes.map(change => {
@@ -371,7 +399,7 @@ export default function ProjectDetail({
                         {up ? <ArrowUpRight className="size-3.5" /> : <ArrowDownRight className="size-3.5" />}
                       </span>
                       <div className="min-w-0 flex-1">
-                        <div className="truncate font-medium">{change.reason || '手动调整总金额'}</div>
+                        <div className="truncate font-medium">{change.reason || t('project.detail.manualAdjust')}</div>
                         <div className="tabular mt-0.5 text-[11px] text-muted-foreground">
                           {money(change.old_amount)} → {money(change.new_amount)} · {formatTime(change.created_at)}
                         </div>
@@ -403,18 +431,18 @@ export default function ProjectDetail({
           {/* 项目记录 */}
           <TabsContent value="records" className="space-y-3">
             {!loading && comments.length === 0 && (
-              <p className="text-xs text-muted-foreground">还没有记录。变更说明、问题、收款进度都能写在这儿。</p>
+              <p className="text-xs text-muted-foreground">{t('project.detail.noRecords')}</p>
             )}
 
             <ul className="space-y-2.5">
               {comments.map((comment, index) => (
                 <li key={comment.id ?? index} className="flex gap-2.5 rounded-lg border border-border px-3 py-2.5">
                   <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-accent text-[10px] font-semibold text-accent-foreground">
-                    我
+                    {t('task.detail.me').slice(0, 1)}
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="mb-1 flex items-center gap-2">
-                      <span className="text-[12px] font-medium">我</span>
+                      <span className="text-[12px] font-medium">{t('task.detail.me')}</span>
                       <span className="text-[11px] text-muted-foreground">{formatTime(comment.created_at)}</span>
                       <Button
                         variant="ghost"
@@ -422,7 +450,7 @@ export default function ProjectDetail({
                         className="ml-auto text-muted-foreground hover:bg-red-50 hover:text-red-600"
                         onClick={() => removeComment(comment.id)}
                       >
-                        删除
+                        {t('common.delete')}
                       </Button>
                     </div>
                     <RichText source={comment.content} />
@@ -435,9 +463,9 @@ export default function ProjectDetail({
               value={commentDraft}
               onChange={setCommentDraft}
               onSubmit={submitComment}
-              placeholder="记一条变更说明 / 问题 / 收款进度…（⌘/Ctrl + Enter 发送）"
-              quickInserts={COMMENT_TEMPLATES}
-              submitLabel="记一条"
+              placeholder={t('project.detail.recordPlaceholder')}
+              quickInserts={commentTemplates}
+              submitLabel={t('project.detail.addRecord')}
               minRows={3}
             />
           </TabsContent>
@@ -451,7 +479,7 @@ export default function ProjectDetail({
         lockProject
         onClose={() => setFormOpen(false)}
         onSaved={async () => {
-          await reloadReceivables()
+          await Promise.all([reloadReceivables(), reloadProject()])
           onChanged?.()
         }}
       />

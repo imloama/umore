@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { ArrowRight, Briefcase, GripVertical, Plus, Trash } from 'lucide-react'
 import { projectApi, taskApi } from '../services/api'
 import type { OpportunityStatus, Project, Task } from '../types'
+import { useI18n } from '@/i18n'
 import PageHeader from '../components/PageHeader'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -10,9 +11,15 @@ import { Dialog } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
-import { Textarea } from '@/components/ui/textarea'
+import RichTextEditor from '../components/RichTextEditor'
 import { cn } from '@/lib/utils'
-import { OPPORTUNITY_LABEL, OPPORTUNITY_ORDER, PRIORITY_COLOR, PRIORITY_LABEL } from '../components/taskMeta'
+import {
+  OPPORTUNITY_KEYS,
+  OPPORTUNITY_ORDER,
+  PRIORITY_COLOR,
+  PRIORITY_KEYS,
+  PRIORITY_ORDER
+} from '../components/taskMeta'
 
 const STAGE_STYLE: Record<OpportunityStatus, string> = {
   lead: 'border-t-slate-400',
@@ -33,6 +40,7 @@ const emptyForm = (): Task => ({
 })
 
 export default function Opportunities() {
+  const { t } = useI18n()
   const [items, setItems] = useState<Task[]>([])
   const [projects, setProjects] = useState<Project[]>([])
   const [showForm, setShowForm] = useState(false)
@@ -86,13 +94,13 @@ export default function Opportunities() {
   }
 
   const remove = async (id: number) => {
-    if (!confirm('确定删除该商机?')) return
+    if (!confirm(t('opportunity.confirmDelete'))) return
     await taskApi.remove(id)
     await loadAll()
   }
 
   const convertToProject = async (task: Task) => {
-    const name = prompt('新项目名称', task.title)
+    const name = prompt(t('opportunity.newProjectName'), task.title)
     if (!name) return
     const project = await projectApi.create({
       name,
@@ -107,7 +115,7 @@ export default function Opportunities() {
       opportunity_status: 'won',
       status: 'DONE'
     })
-    alert(`已创建项目「${project.name}」并关联`)
+    alert(t('opportunity.projectCreated', { name: project.name }))
     await loadAll()
   }
 
@@ -118,27 +126,27 @@ export default function Opportunities() {
     <div>
       <PageHeader
         eyebrow="OPPORTUNITIES"
-        title="商机"
-        description="线索 → 跟进 → 报价 → 赢单，卡片直接拖到下一列，赢单后一键转成项目。"
+        title={t('opportunity.title')}
+        description={t('opportunity.description')}
         actions={
           <Button onClick={() => { setForm(emptyForm()); setShowForm(true) }}>
             <Plus />
-            新建商机
+            {t('opportunity.new')}
           </Button>
         }
       />
 
       <div className="mb-4 grid gap-3 sm:grid-cols-3">
         <Card className="px-4 py-3">
-          <div className="text-[11px] text-muted-foreground">在跟</div>
+          <div className="text-[11px] text-muted-foreground">{t('opportunity.openCount')}</div>
           <div className="tabular mt-1 text-2xl font-semibold text-blue-600">{open}</div>
         </Card>
         <Card className="px-4 py-3">
-          <div className="text-[11px] text-muted-foreground">已赢单</div>
+          <div className="text-[11px] text-muted-foreground">{t('opportunity.wonCount')}</div>
           <div className="tabular mt-1 text-2xl font-semibold text-emerald-600">{won}</div>
         </Card>
         <Card className="px-4 py-3">
-          <div className="text-[11px] text-muted-foreground">转化率</div>
+          <div className="text-[11px] text-muted-foreground">{t('opportunity.conversion')}</div>
           <div className="tabular mt-1 text-2xl font-semibold">
             {items.length ? Math.round((won / items.length) * 100) : 0}%
           </div>
@@ -156,7 +164,7 @@ export default function Opportunities() {
                   STAGE_STYLE[stage]
                 )}
               >
-                <span className="text-[12px] font-semibold">{OPPORTUNITY_LABEL[stage]}</span>
+                <span className="text-[12px] font-semibold">{t(OPPORTUNITY_KEYS[stage])}</span>
                 <span className="tabular text-[11px] text-muted-foreground">{stageItems.length}</span>
               </div>
               <div
@@ -216,7 +224,7 @@ export default function Opportunities() {
                         style={{ color: PRIORITY_COLOR[item.priority] }}
                       >
                         <i className="size-1.5 rounded-full bg-current" />
-                        {PRIORITY_LABEL[item.priority]}
+                        {t(PRIORITY_KEYS[item.priority])}
                       </span>
                       {item.project_name && <Badge variant="muted">{item.project_name}</Badge>}
                     </div>
@@ -226,7 +234,7 @@ export default function Opportunities() {
                       onChange={e => moveTo(item, e.target.value as OpportunityStatus)}
                     >
                       {OPPORTUNITY_ORDER.map(value => (
-                        <option key={value} value={value}>{OPPORTUNITY_LABEL[value]}</option>
+                        <option key={value} value={value}>{t(OPPORTUNITY_KEYS[value])}</option>
                       ))}
                     </Select>
                     {['lead', 'qualifying', 'proposal'].includes(stage) && (
@@ -237,14 +245,14 @@ export default function Opportunities() {
                         onClick={() => convertToProject(item)}
                       >
                         <Briefcase />
-                        转为项目
+                        {t('opportunity.toProject')}
                       </Button>
                     )}
                   </Card>
                 ))}
                 {stageItems.length === 0 && (
                   <div className="rounded-md border border-dashed border-border py-5 text-center text-[11px] text-muted-foreground/70">
-                    空
+                    {t('opportunity.empty')}
                   </div>
                 )}
               </div>
@@ -256,13 +264,13 @@ export default function Opportunities() {
       <Dialog
         open={showForm}
         onClose={() => setShowForm(false)}
-        title="新建商机"
-        description="先记下一句话需求，转化率是这里唯一的指标。"
+        title={t('opportunity.new')}
+        description={t('opportunity.formDescription')}
         footer={
           <>
-            <Button variant="outline" onClick={() => setShowForm(false)}>取消</Button>
+            <Button variant="outline" onClick={() => setShowForm(false)}>{t('common.cancel')}</Button>
             <Button type="submit" form="opp-form">
-              保存
+              {t('common.save')}
               <ArrowRight />
             </Button>
           </>
@@ -270,39 +278,39 @@ export default function Opportunities() {
       >
         <form id="opp-form" onSubmit={submit} className="space-y-3.5">
           <div>
-            <Label>标题 *</Label>
+            <Label>{t('opportunity.field.title')}</Label>
             <Input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} required />
           </div>
           <div className="grid gap-3 sm:grid-cols-3">
             <div>
-              <Label>阶段</Label>
+              <Label>{t('opportunity.field.stage')}</Label>
               <Select
                 value={form.opportunity_status || 'lead'}
                 onChange={e => setForm({ ...form, opportunity_status: e.target.value as OpportunityStatus })}
               >
                 {OPPORTUNITY_ORDER.map(value => (
-                  <option key={value} value={value}>{OPPORTUNITY_LABEL[value]}</option>
+                  <option key={value} value={value}>{t(OPPORTUNITY_KEYS[value])}</option>
                 ))}
               </Select>
             </div>
             <div>
-              <Label>优先级</Label>
+              <Label>{t('opportunity.field.priority')}</Label>
               <Select
                 value={form.priority}
                 onChange={e => setForm({ ...form, priority: e.target.value as Task['priority'] })}
               >
-                {Object.entries(PRIORITY_LABEL).map(([value, label]) => (
-                  <option key={value} value={value}>{label}</option>
+                {PRIORITY_ORDER.map(value => (
+                  <option key={value} value={value}>{t(PRIORITY_KEYS[value])}</option>
                 ))}
               </Select>
             </div>
             <div>
-              <Label>关联项目</Label>
+              <Label>{t('opportunity.field.project')}</Label>
               <Select
                 value={form.project_id ?? ''}
                 onChange={e => setForm({ ...form, project_id: e.target.value ? Number(e.target.value) : undefined })}
               >
-                <option value="">不关联</option>
+                <option value="">{t('task.field.projectNone')}</option>
                 {projects.map(p => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
@@ -310,8 +318,13 @@ export default function Opportunities() {
             </div>
           </div>
           <div>
-            <Label>备注</Label>
-            <Textarea rows={4} value={form.content || ''} onChange={e => setForm({ ...form, content: e.target.value })} />
+            <Label>{t('opportunity.field.note')}</Label>
+            <RichTextEditor
+              value={form.content || ''}
+              onChange={next => setForm({ ...form, content: next })}
+              minRows={4}
+              placeholder={t('task.field.contentPlaceholder')}
+            />
           </div>
         </form>
       </Dialog>

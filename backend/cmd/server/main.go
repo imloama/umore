@@ -195,11 +195,13 @@ func main() {
 			labels.DELETE("/:id", labelHandler.Delete)
 		}
 
-		// 附件（评论/内容里粘贴的截图）
+		// 附件（评论/内容里粘贴的截图与文件）。
+		// 读写都在 /api 下面：上传者的身份必须校验，附件不对外公开。
 		attachments := api.Group("/attachments")
 		{
 			attachments.POST("", attachmentHandler.Upload)
 			attachments.POST("/upload", attachmentHandler.Upload)
+			attachments.GET("/:id", attachmentHandler.Serve)
 		}
 
 		// 灵感
@@ -213,8 +215,14 @@ func main() {
 		}
 	}
 
-	// 上传的图片走静态托管
-	r.Static("/uploads", uploadDir)
+	// 只有头像还是公开静态资源（<img> 带不了鉴权头，且头像本身不含隐私）。
+	// 其余附件一律走 /api/attachments/:id，登录且是本人才能取。
+	r.Static("/uploads/avatars", filepath.Join(uploadDir, "avatars"))
+
+	// 老版本的公开地址：/uploads/<年>/<月>/<文件>。
+	// 文件已被 migrate attachments 搬进按人目录，但旧链接（书签、别处贴过的正文）
+	// 还这么写着，所以这里按文件名反查归属后走同样的鉴权，不回 404 也不裸奔。
+	r.GET("/uploads/:year/:month/:file", handler.RequireAuth(sessions), attachmentHandler.ServeLegacy)
 
 	// 前端构建产物存在时一并托管，单进程即可部署（前后端同源，不用再配 CORS/代理）
 	if indexPath := filepath.Join(webDir, "index.html"); fileExists(indexPath) {

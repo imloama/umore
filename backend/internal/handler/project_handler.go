@@ -37,7 +37,7 @@ func (h *ProjectHandler) GetOne(c *gin.Context) {
 		return
 	}
 	if project == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "project not found"})
+		fail(c, http.StatusNotFound, codeProjectNotFound, "project not found")
 		return
 	}
 
@@ -47,7 +47,7 @@ func (h *ProjectHandler) GetOne(c *gin.Context) {
 func (h *ProjectHandler) Create(c *gin.Context) {
 	var payload projectPayload
 	if err := c.ShouldBindJSON(&payload); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		fail(c, http.StatusBadRequest, codeInvalidParams, err.Error())
 		return
 	}
 	project := payload.Project
@@ -72,13 +72,13 @@ func (h *ProjectHandler) Update(c *gin.Context) {
 		return
 	}
 	if existing == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "project not found"})
+		fail(c, http.StatusNotFound, codeProjectNotFound, "project not found")
 		return
 	}
 
 	var payload projectPayload
 	if err := c.ShouldBindJSON(&payload); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		fail(c, http.StatusBadRequest, codeInvalidParams, err.Error())
 		return
 	}
 	project := payload.Project
@@ -91,7 +91,7 @@ func (h *ProjectHandler) Update(c *gin.Context) {
 
 	updated, err := h.Repo.GetProject(userID(c), id)
 	if err != nil || updated == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reload project"})
+		fail(c, http.StatusInternalServerError, codeReloadFailed, "failed to reload project")
 		return
 	}
 	c.JSON(http.StatusOK, updated)
@@ -110,7 +110,7 @@ func (h *ProjectHandler) Delete(c *gin.Context) {
 func (h *ProjectHandler) GetAmountChanges(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		fail(c, http.StatusBadRequest, codeInvalidID, "invalid id")
 		return
 	}
 	changes, err := h.Repo.GetProjectAmountChanges(userID(c), id)
@@ -125,7 +125,7 @@ func (h *ProjectHandler) GetAmountChanges(c *gin.Context) {
 func (h *ProjectHandler) AddAmountChange(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		fail(c, http.StatusBadRequest, codeInvalidID, "invalid id")
 		return
 	}
 	var req struct {
@@ -133,11 +133,11 @@ func (h *ProjectHandler) AddAmountChange(c *gin.Context) {
 		Reason    string       `json:"reason"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		fail(c, http.StatusBadRequest, codeInvalidParams, err.Error())
 		return
 	}
 	if req.NewAmount.IsNegative() {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "new_amount must be >= 0"})
+		fail(c, http.StatusBadRequest, codeAmountInvalid, "new_amount must be >= 0")
 		return
 	}
 
@@ -154,7 +154,7 @@ func (h *ProjectHandler) AddAmountChange(c *gin.Context) {
 func (h *ProjectHandler) DeleteAmountChange(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		fail(c, http.StatusBadRequest, codeInvalidID, "invalid id")
 		return
 	}
 	if err := h.Repo.DeleteProjectAmountChange(userID(c), id); err != nil {
@@ -169,7 +169,7 @@ func (h *ProjectHandler) DeleteAmountChange(c *gin.Context) {
 func (h *ProjectHandler) GetComments(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		fail(c, http.StatusBadRequest, codeInvalidID, "invalid id")
 		return
 	}
 	comments, err := h.Repo.GetComments(userID(c), "project", id)
@@ -184,18 +184,18 @@ func (h *ProjectHandler) GetComments(c *gin.Context) {
 func (h *ProjectHandler) AddComment(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		fail(c, http.StatusBadRequest, codeInvalidID, "invalid id")
 		return
 	}
 	var req struct {
 		Content string `json:"content"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		fail(c, http.StatusBadRequest, codeInvalidParams, err.Error())
 		return
 	}
 	if req.Content == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "content is required"})
+		fail(c, http.StatusBadRequest, codeCommentRequired, "content is required")
 		return
 	}
 

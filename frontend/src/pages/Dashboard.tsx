@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { AlertTriangle, ArrowRight, Briefcase, CalendarClock, CircleCheckBig, FolderKanban, Timer, TrendingDown, TrendingUp, Wallet } from 'lucide-react'
 import api, { receivableApi, taskApi } from '../services/api'
 import type { Project, Receivable, ReceivableSummary, Task, TaskStats } from '../types'
+import { useI18n } from '../i18n'
 import PageHeader from '../components/PageHeader'
 import HoursDelta from '../components/HoursDelta'
 import TaskDetail from '../components/TaskDetail'
@@ -11,7 +12,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
-import { CATEGORY_LABEL, CATEGORY_STYLE, formatHours } from '../components/taskMeta'
+import { CATEGORY_KEYS, CATEGORY_ORDER, CATEGORY_STYLE, formatHours } from '../components/taskMeta'
 
 const EMPTY_RECEIVABLE: ReceivableSummary = {
   pending_count: 0,
@@ -34,6 +35,7 @@ const EMPTY_STATS: TaskStats = {
 }
 
 export default function Dashboard() {
+  const { t } = useI18n()
   const [stats, setStats] = useState<TaskStats>(EMPTY_STATS)
   const [todayTasks, setTodayTasks] = useState<Task[]>([])
   const [projects, setProjects] = useState<Project[]>([])
@@ -86,12 +88,12 @@ export default function Dashboard() {
     <div>
       <PageHeader
         eyebrow="WORKSPACE"
-        title="仪表盘"
-        description="今天的活、手上的单、这个月的钱，一眼看完。"
+        title={t('dashboard.title')}
+        description={t('dashboard.description')}
         actions={
           <Button asChild size="sm" variant="outline">
             <Link to="/today">
-              进入今日
+              {t('dashboard.enterToday')}
               <ArrowRight />
             </Link>
           </Button>
@@ -102,14 +104,14 @@ export default function Dashboard() {
         {/* 主卡：今日进度 */}
         <div className="relative overflow-hidden rounded-lg bg-gradient-to-br from-primary to-blue-600 px-4 py-3.5 text-white shadow-sm sm:col-span-2 xl:col-span-1">
           <div className="flex items-center justify-between text-[11px] text-blue-100">
-            <span>今日进度</span>
+            <span>{t('dashboard.todayProgress')}</span>
             <CircleCheckBig className="size-4" />
           </div>
           <div className="tabular mt-2 text-3xl font-semibold">
             {stats.today_done}
             <span className="ml-1 text-sm font-normal text-blue-100">/ {stats.today_total}</span>
           </div>
-          <div className="mt-1 text-[11px] text-blue-100">完成率 {progress}%</div>
+          <div className="mt-1 text-[11px] text-blue-100">{t('dashboard.progressRate', { n: progress })}</div>
           <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/25">
             <div className="h-full rounded-full bg-white transition-all" style={{ width: `${progress}%` }} />
           </div>
@@ -118,7 +120,7 @@ export default function Dashboard() {
         <Card>
           <CardHeader className="pb-1">
             <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-              <span>今日工时</span>
+              <span>{t('dashboard.todayHours')}</span>
               <Timer className="size-4 text-amber-500" />
             </div>
           </CardHeader>
@@ -126,7 +128,7 @@ export default function Dashboard() {
             <div className="tabular text-2xl font-semibold">
               {formatHours(stats.today_actual_hours) || '0h'}
               <span className="ml-1 text-xs font-normal text-muted-foreground">
-                / {formatHours(stats.today_estimated_hours) || '未评估'}
+                / {formatHours(stats.today_estimated_hours) || t('task.stats.notEstimated')}
               </span>
             </div>
             <div className="mt-1.5">
@@ -138,17 +140,17 @@ export default function Dashboard() {
         <Card>
           <CardHeader className="pb-1">
             <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-              <span>活跃项目</span>
+              <span>{t('dashboard.activeProjects')}</span>
               <FolderKanban className="size-4 text-primary" />
             </div>
           </CardHeader>
           <CardContent>
             <div className="tabular text-2xl font-semibold">
               {activeProjects.length}
-              <span className="ml-1 text-xs font-normal text-muted-foreground">个</span>
+              <span className="ml-1 text-xs font-normal text-muted-foreground">{t('dashboard.projectUnit')}</span>
             </div>
             <div className="mt-1.5 text-[11px] text-muted-foreground">
-              累计投入 {formatHours(totalHours) || '0h'}
+              {t('dashboard.totalInvested', { hours: formatHours(totalHours) || '0h' })}
             </div>
           </CardContent>
         </Card>
@@ -156,7 +158,7 @@ export default function Dashboard() {
         <Card>
           <CardHeader className="pb-1">
             <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-              <span>本月余额</span>
+              <span>{t('dashboard.monthBalance')}</span>
               <Wallet className="size-4 text-emerald-500" />
             </div>
           </CardHeader>
@@ -174,14 +176,14 @@ export default function Dashboard() {
                 <TrendingDown className="size-4 self-center" />
               )}
             </div>
-            <div className="mt-1.5 text-[11px] text-muted-foreground">未完成 {pending} 项</div>
+            <div className="mt-1.5 text-[11px] text-muted-foreground">{t('dashboard.pendingTasks', { n: pending })}</div>
           </CardContent>
         </Card>
 
         <Card className={cn(receivableSum.overdue_count > 0 && 'border-red-200 bg-red-50/30')}>
           <CardHeader className="pb-1">
             <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-              <span>未收款</span>
+              <span>{t('dashboard.unreceived')}</span>
               <Wallet className={cn('size-4', receivableSum.overdue_count > 0 ? 'text-red-500' : 'text-amber-500')} />
             </div>
           </CardHeader>
@@ -192,13 +194,16 @@ export default function Dashboard() {
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px]">
               {receivableSum.overdue_count > 0 ? (
                 <Link to="/receivables" className="font-medium text-red-600 hover:underline">
-                  逾期 {receivableSum.overdue_count} 笔 · ¥{receivableSum.overdue_amount.toFixed(2)}
+                  {t('dashboard.overdueLine', {
+                    n: receivableSum.overdue_count,
+                    amount: `¥${receivableSum.overdue_amount.toFixed(2)}`
+                  })}
                 </Link>
               ) : (
-                <span className="text-muted-foreground">没有逾期的</span>
+                <span className="text-muted-foreground">{t('dashboard.noOverdue')}</span>
               )}
               {receivableSum.due_soon_count > 0 && (
-                <span className="text-muted-foreground">· 7 天内 {receivableSum.due_soon_count} 笔</span>
+                <span className="text-muted-foreground">{t('dashboard.dueSoonLine', { n: receivableSum.due_soon_count })}</span>
               )}
             </div>
           </CardContent>
@@ -208,17 +213,17 @@ export default function Dashboard() {
       <div className="mt-4 grid gap-4 xl:grid-cols-[1.5fr_1fr]">
         <Card className="overflow-hidden">
           <CardHeader className="flex-row items-center justify-between border-b border-border py-3">
-            <CardTitle>今日任务</CardTitle>
+            <CardTitle>{t('dashboard.todayTasks')}</CardTitle>
             <Button asChild variant="ghost" size="sm">
               <Link to="/today">
-                全部
+                {t('dashboard.all')}
                 <ArrowRight />
               </Link>
             </Button>
           </CardHeader>
           {todayTasks.length === 0 ? (
             <div className="px-4 py-10 text-center text-xs text-muted-foreground">
-              今天还没安排任务，去任务池挑几件加进来。
+              {t('dashboard.noTodayTasks')}
             </div>
           ) : (
             <ul className="divide-y divide-border">
@@ -232,6 +237,10 @@ export default function Dashboard() {
                     await taskApi.update(task.id!, { ...task, status: task.status === 'DONE' ? 'TODO' : 'DONE' })
                     loadStats()
                   }}
+                  onComplete={async () => {
+                    await taskApi.update(task.id!, { ...task, status: 'DONE' })
+                    loadStats()
+                  }}
                 />
               ))}
             </ul>
@@ -241,16 +250,16 @@ export default function Dashboard() {
         <div className="space-y-4">
           <Card>
             <CardHeader className="flex-row items-center justify-between py-3">
-              <CardTitle>该催的钱</CardTitle>
+              <CardTitle>{t('dashboard.urgentMoney')}</CardTitle>
               <Button asChild variant="ghost" size="sm">
                 <Link to="/receivables">
-                  回款
+                  {t('dashboard.receivables')}
                   <ArrowRight />
                 </Link>
               </Button>
             </CardHeader>
             {urgentReceivables.length === 0 ? (
-              <div className="px-4 pb-4 text-xs text-muted-foreground">没有逾期或临近到期的款，安心干活。</div>
+              <div className="px-4 pb-4 text-xs text-muted-foreground">{t('dashboard.noUrgentMoney')}</div>
             ) : (
               <ul className="divide-y divide-border border-t border-border">
                 {urgentReceivables.map(item => (
@@ -263,8 +272,12 @@ export default function Dashboard() {
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-[12.5px] font-medium">{item.title}</div>
                       <div className="truncate text-[10.5px] text-muted-foreground">
-                        {item.project_name || '未关联项目'} · {item.due_date}
-                        {item.overdue && <span className="ml-1 text-red-600">逾期 {-item.days_left!} 天</span>}
+                        {item.project_name || t('dashboard.unlinkedProject')} · {item.due_date}
+                        {item.overdue && (
+                          <span className="ml-1 text-red-600">
+                            {t('dashboard.overdueDays', { n: -item.days_left! })}
+                          </span>
+                        )}
                       </div>
                     </div>
                     <span className="tabular shrink-0 text-[12px] font-semibold text-amber-700">
@@ -278,19 +291,19 @@ export default function Dashboard() {
 
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle>按类型分布</CardTitle>
+              <CardTitle>{t('dashboard.byCategory')}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
-              {Object.entries(CATEGORY_LABEL).map(([key, label]) => {
+              {CATEGORY_ORDER.map(key => {
                 const count = stats.by_category[key] || 0
                 const total = Object.values(stats.by_category).reduce((a, b) => a + b, 0) || 1
                 return (
                   <div key={key} className="flex items-center gap-2">
-                    <span className={cn('size-2 rounded-sm', CATEGORY_STYLE[key as keyof typeof CATEGORY_STYLE].dot)} />
-                    <span className="w-10 text-[12px] text-muted-foreground">{label}</span>
+                    <span className={cn('size-2 rounded-sm', CATEGORY_STYLE[key].dot)} />
+                    <span className="w-14 truncate text-[12px] text-muted-foreground">{t(CATEGORY_KEYS[key])}</span>
                     <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-secondary">
                       <div
-                        className={cn('h-full rounded-full', CATEGORY_STYLE[key as keyof typeof CATEGORY_STYLE].bar)}
+                        className={cn('h-full rounded-full', CATEGORY_STYLE[key].bar)}
                         style={{ width: `${Math.round((count / total) * 100)}%` }}
                       />
                     </div>
@@ -303,17 +316,17 @@ export default function Dashboard() {
 
           <Card>
             <CardHeader className="flex-row items-center justify-between py-3">
-              <CardTitle>活跃项目</CardTitle>
+              <CardTitle>{t('dashboard.activeProjectList')}</CardTitle>
               <Button asChild variant="ghost" size="sm">
                 <Link to="/projects">
-                  全部
+                  {t('dashboard.all')}
                   <ArrowRight />
                 </Link>
               </Button>
             </CardHeader>
             <CardContent className="space-y-2 pt-0">
               {activeProjects.length === 0 && (
-                <p className="text-xs text-muted-foreground">还没有活跃项目，商机赢了之后在这里建。</p>
+                <p className="text-xs text-muted-foreground">{t('dashboard.noActiveProjects')}</p>
               )}
               {activeProjects.slice(0, 4).map(project => (
                 <div key={project.id} className="flex items-center gap-2 rounded-md px-1.5 py-1.5 hover:bg-secondary/50">
@@ -330,6 +343,11 @@ export default function Dashboard() {
       {/* 仪表盘里点任务直接看详情，不用先跳到今日 */}
       <TaskDetail
         task={detail}
+        onComplete={async task => {
+          await taskApi.update(task.id!, { ...task, status: 'DONE' })
+          setDetail(null)
+          loadStats()
+        }}
         onClose={() => {
           setDetail(null)
           loadStats()

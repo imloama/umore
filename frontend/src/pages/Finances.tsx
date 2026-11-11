@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ArrowDownLeft, ArrowUpRight, Plus, Receipt, Trash, Wallet } from 'lucide-react'
 import api from '../services/api'
 import type { Finance } from '../types'
+import { useI18n } from '@/i18n'
 import PageHeader from '../components/PageHeader'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -24,6 +25,7 @@ const emptyForm = (): Partial<Finance> => ({
 })
 
 export default function Finances() {
+  const { t } = useI18n()
   const [finances, setFinances] = useState<Finance[]>([])
   const [summary, setSummary] = useState({ total_income: 0, total_expense: 0, balance: 0 })
   const [startDate, setStartDate] = useState(() => {
@@ -71,7 +73,7 @@ export default function Finances() {
   }
 
   const remove = async (id: number) => {
-    if (!confirm('确定删除?')) return
+    if (!confirm(t('finance.confirmDelete'))) return
     try {
       await api.delete(`/finances/${id}`)
       loadFinances()
@@ -86,8 +88,8 @@ export default function Finances() {
     <div>
       <PageHeader
         eyebrow="FINANCE"
-        title="财务"
-        description="记流水、看余额。这里不做开票处理。"
+        title={t('finance.title')}
+        description={t('finance.description')}
         actions={
           <>
             <div className="flex items-center gap-1.5">
@@ -97,12 +99,12 @@ export default function Finances() {
                 onChange={e => setStartDate(e.target.value)}
                 className="w-[140px]"
               />
-              <span className="text-xs text-muted-foreground">至</span>
+              <span className="text-xs text-muted-foreground">{t('finance.to')}</span>
               <Input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="w-[140px]" />
             </div>
             <Button onClick={() => { setForm(emptyForm()); setShowForm(true) }}>
               <Plus />
-              记一笔
+              {t('finance.new')}
             </Button>
           </>
         }
@@ -111,7 +113,7 @@ export default function Finances() {
       <div className="mb-4 grid gap-3 sm:grid-cols-3">
         <Card className="px-4 py-3.5">
           <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-            <span>收入</span>
+            <span>{t('finance.income')}</span>
             <ArrowDownLeft className="size-4 text-emerald-500" />
           </div>
           <div className="tabular mt-1.5 text-2xl font-semibold text-emerald-600">
@@ -120,7 +122,7 @@ export default function Finances() {
         </Card>
         <Card className="px-4 py-3.5">
           <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-            <span>支出</span>
+            <span>{t('finance.expense')}</span>
             <ArrowUpRight className="size-4 text-red-500" />
           </div>
           <div className="tabular mt-1.5 text-2xl font-semibold text-red-600">
@@ -134,7 +136,7 @@ export default function Finances() {
           )}
         >
           <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-            <span>余额</span>
+            <span>{t('finance.balance')}</span>
             <Wallet className="size-4 text-primary" />
           </div>
           <div
@@ -151,14 +153,16 @@ export default function Finances() {
       <Card className="overflow-hidden">
         <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
           <span className="text-[13px] font-semibold">
-            流水
-            <span className="ml-1 text-[11px] font-normal text-muted-foreground">{finances.length} 笔</span>
+            {t('finance.flows')}
+            <span className="ml-1 text-[11px] font-normal text-muted-foreground">
+              {t('finance.flowCount', { n: finances.length })}
+            </span>
           </span>
         </div>
         {finances.length === 0 ? (
           <div className="flex flex-col items-center gap-2 px-4 py-12 text-center">
             <Receipt className="size-6 text-muted-foreground/60" />
-            <div className="text-xs text-muted-foreground">这段时间还没有记录。</div>
+            <div className="text-xs text-muted-foreground">{t('finance.empty')}</div>
           </div>
         ) : (
           <ul className="divide-y divide-border">
@@ -179,7 +183,7 @@ export default function Finances() {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
                     <span className="truncate text-[13px] font-medium">
-                      {finance.description || finance.category || '未命名记录'}
+                      {finance.description || finance.category || t('finance.unnamed')}
                     </span>
                     {finance.category && <Badge variant="outline">{finance.category}</Badge>}
                   </div>
@@ -218,26 +222,26 @@ export default function Finances() {
       <Dialog
         open={showForm}
         onClose={() => setShowForm(false)}
-        title={form.id ? '编辑记录' : '记一笔'}
+        title={form.id ? t('finance.editTitle') : t('finance.new')}
         className="max-w-lg"
         footer={
           <>
-            <Button variant="outline" onClick={() => setShowForm(false)}>取消</Button>
-            <Button type="submit" form="finance-form">保存</Button>
+            <Button variant="outline" onClick={() => setShowForm(false)}>{t('common.cancel')}</Button>
+            <Button type="submit" form="finance-form">{t('common.save')}</Button>
           </>
         }
       >
         <form id="finance-form" onSubmit={submit} className="space-y-3.5">
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
-              <Label>类型</Label>
+              <Label>{t('finance.form.type')}</Label>
               <Select value={form.type} onChange={e => setForm({ ...form, type: e.target.value as Finance['type'] })}>
-                <option value="income">收入</option>
-                <option value="expense">支出</option>
+                <option value="income">{t('finance.income')}</option>
+                <option value="expense">{t('finance.expense')}</option>
               </Select>
             </div>
             <div>
-              <Label>金额 *</Label>
+              <Label>{t('finance.form.amount')}</Label>
               <Input
                 type="number"
                 step="0.01"
@@ -249,16 +253,16 @@ export default function Finances() {
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
-              <Label>分类</Label>
+              <Label>{t('finance.form.category')}</Label>
               <Input value={form.category || ''} onChange={e => setForm({ ...form, category: e.target.value })} />
             </div>
             <div>
-              <Label>日期</Label>
+              <Label>{t('finance.form.date')}</Label>
               <Input type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} required />
             </div>
           </div>
           <div>
-            <Label>描述</Label>
+            <Label>{t('finance.form.description')}</Label>
             <Textarea rows={2} value={form.description || ''} onChange={e => setForm({ ...form, description: e.target.value })} />
           </div>
         </form>

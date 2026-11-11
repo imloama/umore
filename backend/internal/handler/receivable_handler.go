@@ -74,11 +74,11 @@ func (h *ReceivableHandler) GetSummary(c *gin.Context) {
 func (h *ReceivableHandler) Create(c *gin.Context) {
 	var payload receivablePayload
 	if err := c.ShouldBindJSON(&payload); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		fail(c, http.StatusBadRequest, codeInvalidParams, err.Error())
 		return
 	}
 	if payload.Amount.IsNegative() {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "amount must be >= 0"})
+		fail(c, http.StatusBadRequest, codeAmountInvalid, "amount must be >= 0")
 		return
 	}
 
@@ -99,16 +99,16 @@ func (h *ReceivableHandler) Create(c *gin.Context) {
 func (h *ReceivableHandler) Update(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		fail(c, http.StatusBadRequest, codeInvalidID, "invalid id")
 		return
 	}
 	var payload receivablePayload
 	if err := c.ShouldBindJSON(&payload); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		fail(c, http.StatusBadRequest, codeInvalidParams, err.Error())
 		return
 	}
 	if payload.Amount.IsNegative() {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "amount must be >= 0"})
+		fail(c, http.StatusBadRequest, codeAmountInvalid, "amount must be >= 0")
 		return
 	}
 
@@ -120,7 +120,7 @@ func (h *ReceivableHandler) Update(c *gin.Context) {
 	}
 	updated, err := h.Repo.GetReceivable(userID(c), id)
 	if err != nil || updated == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reload receivable"})
+		fail(c, http.StatusInternalServerError, codeReloadFailed, "failed to reload receivable")
 		return
 	}
 	c.JSON(http.StatusOK, updated)
@@ -130,14 +130,14 @@ func (h *ReceivableHandler) Update(c *gin.Context) {
 func (h *ReceivableHandler) SetStatus(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		fail(c, http.StatusBadRequest, codeInvalidID, "invalid id")
 		return
 	}
 	var req struct {
 		Done bool `json:"done"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		fail(c, http.StatusBadRequest, codeInvalidParams, err.Error())
 		return
 	}
 	if err := h.Repo.SetReceivableStatus(userID(c), id, req.Done); err != nil {
@@ -156,7 +156,7 @@ func (h *ReceivableHandler) SetStatus(c *gin.Context) {
 func (h *ReceivableHandler) Delete(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		fail(c, http.StatusBadRequest, codeInvalidID, "invalid id")
 		return
 	}
 	if err := h.Repo.DeleteReceivable(userID(c), id); err != nil {

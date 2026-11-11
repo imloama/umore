@@ -29,11 +29,11 @@ func (h *IdeaHandler) GetAll(c *gin.Context) {
 func (h *IdeaHandler) Create(c *gin.Context) {
 	var idea model.Idea
 	if err := c.ShouldBindJSON(&idea); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		fail(c, http.StatusBadRequest, codeInvalidParams, err.Error())
 		return
 	}
 	if idea.Content == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "内容不能为空"})
+		fail(c, http.StatusBadRequest, codeIdeaContentRequired, "idea content is required")
 		return
 	}
 	if err := h.Repo.CreateIdea(userID(c), &idea); err != nil {
@@ -47,7 +47,7 @@ func (h *IdeaHandler) Create(c *gin.Context) {
 func (h *IdeaHandler) Update(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		fail(c, http.StatusBadRequest, codeInvalidID, "invalid id")
 		return
 	}
 	var body struct {
@@ -55,7 +55,7 @@ func (h *IdeaHandler) Update(c *gin.Context) {
 		Status  string `json:"status"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		fail(c, http.StatusBadRequest, codeInvalidParams, err.Error())
 		return
 	}
 
@@ -65,7 +65,7 @@ func (h *IdeaHandler) Update(c *gin.Context) {
 		return
 	}
 	if existing == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "idea not found"})
+		fail(c, http.StatusNotFound, codeIdeaNotFound, "idea not found")
 		return
 	}
 
@@ -95,7 +95,7 @@ func (h *IdeaHandler) Update(c *gin.Context) {
 func (h *IdeaHandler) Promote(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		fail(c, http.StatusBadRequest, codeInvalidID, "invalid id")
 		return
 	}
 	idea, err := h.Repo.GetIdea(userID(c), id)
@@ -104,7 +104,7 @@ func (h *IdeaHandler) Promote(c *gin.Context) {
 		return
 	}
 	if idea == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "idea not found"})
+		fail(c, http.StatusNotFound, codeIdeaNotFound, "idea not found")
 		return
 	}
 
@@ -144,7 +144,7 @@ func (h *IdeaHandler) Promote(c *gin.Context) {
 func (h *IdeaHandler) Delete(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		fail(c, http.StatusBadRequest, codeInvalidID, "invalid id")
 		return
 	}
 	if err := h.Repo.DeleteIdea(userID(c), id); err != nil {

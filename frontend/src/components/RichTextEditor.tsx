@@ -8,14 +8,16 @@ import {
   Link as LinkIcon,
   List,
   ListOrdered,
+  Loader,
+  Paperclip,
   Pencil,
   Quote,
   SquareCode,
-  Strikethrough,
-  Loader
+  Strikethrough
 } from 'lucide-react'
 import RichText from './RichText'
 import { uploadApi } from '../services/api'
+import { useI18n } from '@/i18n'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
@@ -34,6 +36,8 @@ interface Props {
   minRows?: number
   /** 图片上传实现，默认走后端 /api/attachments；返回可访问的图片地址 */
   uploadImage?: (file: File) => Promise<string>
+  /** 附件上传实现，默认同上；返回可访问地址与原始文件名 */
+  uploadFile?: (file: File) => Promise<{ url: string; name: string }>
 }
 
 type ToolKey =
@@ -51,22 +55,24 @@ type ToolKey =
 const TOOLS: {
   key: ToolKey
   icon: typeof Bold
-  label: string
   wrap?: [string, string]
   prefix?: string
   block?: string
 }[] = [
-  { key: 'bold', icon: Bold, label: '加粗', wrap: ['**', '**'] },
-  { key: 'italic', icon: Italic, label: '斜体', wrap: ['*', '*'] },
-  { key: 'strike', icon: Strikethrough, label: '删除线', wrap: ['~~', '~~'] },
-  { key: 'code', icon: Code, label: '行内代码', wrap: ['`', '`'] },
-  { key: 'codeBlock', icon: SquareCode, label: '代码块', block: '```\n\n```' },
-  { key: 'heading', icon: Heading, label: '标题', prefix: '## ' },
-  { key: 'quote', icon: Quote, label: '引用', prefix: '> ' },
-  { key: 'ul', icon: List, label: '无序列表', prefix: '- ' },
-  { key: 'ol', icon: ListOrdered, label: '有序列表', prefix: '1. ' },
-  { key: 'link', icon: LinkIcon, label: '链接', wrap: ['[', '](https://)'] }
+  { key: 'bold', icon: Bold, wrap: ['**', '**'] },
+  { key: 'italic', icon: Italic, wrap: ['*', '*'] },
+  { key: 'strike', icon: Strikethrough, wrap: ['~~', '~~'] },
+  { key: 'code', icon: Code, wrap: ['`', '`'] },
+  { key: 'codeBlock', icon: SquareCode, block: '```\n\n```' },
+  { key: 'heading', icon: Heading, prefix: '## ' },
+  { key: 'quote', icon: Quote, prefix: '> ' },
+  { key: 'ul', icon: List, prefix: '- ' },
+  { key: 'ol', icon: ListOrdered, prefix: '1. ' },
+  { key: 'link', icon: LinkIcon, wrap: ['[', '](https://)'] }
 ]
+
+const IMAGE_LIMIT = 10 * 1024 * 1024
+const FILE_LIMIT = 20 * 1024 * 1024
 
 export default function RichTextEditor({
   value,
@@ -76,12 +82,15 @@ export default function RichTextEditor({
   quickInserts = [],
   submitLabel,
   minRows = 4,
-  uploadImage
+  uploadImage,
+  uploadFile
 }: Props) {
+  const { t } = useI18n()
   const [tab, setTab] = useState<'write' | 'preview'>('write')
   const [uploading, setUploading] = useState(0)
   const [error, setError] = useState('')
   const ref = useRef<HTMLTextAreaElement>(null)
+  const fileInput = useRef<HTMLInputElement>(null)
   // 连续粘贴多张图时不能依赖 props.value 的闭包值，否则后一张会覆盖前一张
   const valueRef = useRef(value)
   valueRef.current = value
@@ -102,29 +111,68 @@ export default function RichTextEditor({
     })
   }
 
-  // 粘贴/拖入图片 -> 上传 -> 插入 Markdown 图片
+  const doUploadImage = async (file: File) => {
+    const uploader = uploadImage || (async (f: File) => (await uploadApi.image(f)).url)
+    return uploader(file)
+  }
+
+  const doUploadFile = async (file: File) => {
+    if (uploadFile) return uploadFile(file)
+    const res = await uploadApi.file(file)
+    return { url: res.url, name: res.original_name || file.name }
+  }
+
+  // 粘贴/拖入图片 -> 上传 -> 插入 Markdown 图片（渲染后就是图，不是源码）
   const uploadFiles = async (files: File[]) => {
     const images = files.filter(f => f.type.startsWith('image/'))
     if (images.length === 0) return
     setError('')
-    const uploader = uploadImage || (async (file: File) => (await uploadApi.image(file)).url)
     for (const file of images) {
-      if (file.size > 10 * 1024 * 1024) {
-        setError('图片超过 10MB')
+      if (file.size > IMAGE_LIMIT) {
+        setError(t('editor.imageTooLarge'))
         continue
       }
       setUploading(n => n + 1)
       try {
-        const url = await uploader(file)
-        const name = file.name && file.name !== 'image.png' ? file.name : '截图'
+        const url = await doUploadImage(file)
+        const name = file.name && file.name !== 'image.png' ? file.name : 'image'
         insertAtCursor(`![${name}](${url})\n`)
       } catch (err) {
         console.error('Failed to upload image:', err)
-        setError('图片上传失败')
+        setError(t('editor.imageUploadFailed'))
       } finally {
         setUploading(n => n - 1)
       }
     }
+  }
+
+  // 手动选文件：图片走内联渲染，其它文件落成 Markdown 链接，
+  // 渲染后由 RichText 换成附件卡片 —— 用户看到的是「文件」，不是一串地址。
+  const uploadAttachments = async (fileList?: FileList | null) => {
+    const files = Array.from(fileList || [])
+    if (files.length === 0) return
+    setError('')
+    for (const file of files) {
+      if (file.type.startsWith('image/')) {
+        await uploadFiles([file])
+        continue
+      }
+      if (file.size > FILE_LIMIT) {
+        setError(t('editor.fileTooLarge'))
+        continue
+      }
+      setUploading(n => n + 1)
+      try {
+        const uploaded = await doUploadFile(file)
+        insertAtCursor(`[${uploaded.name}](${uploaded.url})\n`)
+      } catch (err) {
+        console.error('Failed to upload file:', err)
+        setError(t('editor.fileUploadFailed'))
+      } finally {
+        setUploading(n => n - 1)
+      }
+    }
+    if (fileInput.current) fileInput.current.value = ''
   }
 
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
@@ -137,9 +185,9 @@ export default function RichTextEditor({
 
   const handleDrop = (e: React.DragEvent<HTMLTextAreaElement>) => {
     const files = Array.from(e.dataTransfer?.files || [])
-    if (files.some(f => f.type.startsWith('image/'))) {
+    if (files.length > 0) {
       e.preventDefault()
-      uploadFiles(files)
+      uploadAttachments(files as unknown as FileList)
     }
   }
 
@@ -198,7 +246,7 @@ export default function RichTextEditor({
             <button
               key={tool.key}
               type="button"
-              title={tool.label}
+              title={t(`editor.${tool.key}`)}
               onClick={() => apply(tool)}
               className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-card hover:text-primary"
             >
@@ -207,23 +255,39 @@ export default function RichTextEditor({
           )
         })}
         <span className="mx-1 h-4 w-px bg-border" />
+        <button
+          type="button"
+          title={t('editor.attach')}
+          onClick={() => fileInput.current?.click()}
+          className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-card hover:text-primary"
+        >
+          <Paperclip className="size-3.5" />
+        </button>
+        <input
+          ref={fileInput}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={e => uploadAttachments(e.target.files)}
+        />
+        <span className="mx-1 h-4 w-px bg-border" />
         <div className="flex rounded-md bg-card/70 p-0.5">
-          {(['write', 'preview'] as const).map(t => (
+          {(['write', 'preview'] as const).map(name => (
             <button
-              key={t}
+              key={name}
               type="button"
-              onClick={() => setTab(t)}
+              onClick={() => setTab(name)}
               className={cn(
                 'flex items-center gap-1 rounded px-2 py-1 text-[11px] transition-colors',
-                tab === t ? 'bg-card font-medium text-primary shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                tab === name ? 'bg-card font-medium text-primary shadow-sm' : 'text-muted-foreground hover:text-foreground'
               )}
             >
-              {t === 'write' ? <Pencil className="size-3" /> : <Eye className="size-3" />}
-              {t === 'write' ? '编辑' : '预览'}
+              {name === 'write' ? <Pencil className="size-3" /> : <Eye className="size-3" />}
+              {name === 'write' ? t('editor.write') : t('editor.preview')}
             </button>
           ))}
         </div>
-        <span className="ml-auto pr-1 text-[10px] text-muted-foreground/70">Markdown</span>
+        <span className="ml-auto pr-1 text-[10px] text-muted-foreground/70">{t('editor.markdown')}</span>
       </div>
 
       {tab === 'write' ? (
@@ -243,7 +307,7 @@ export default function RichTextEditor({
         />
       ) : (
         <div className="min-h-[110px] px-3 py-2.5">
-          {value.trim() ? <RichText source={value} /> : <span className="text-xs text-muted-foreground">暂无内容</span>}
+          {value.trim() ? <RichText source={value} /> : <span className="text-xs text-muted-foreground">{t('editor.noContent')}</span>}
         </div>
       )}
 
@@ -251,12 +315,12 @@ export default function RichTextEditor({
         <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
           {uploading > 0 ? (
             <>
-              <Loader className="size-3 animate-spin" /> 图片上传中…
+              <Loader className="size-3 animate-spin" /> {t('editor.uploading')}
             </>
           ) : error ? (
             <span className="text-red-600">{error}</span>
           ) : (
-            '支持 Markdown，直接粘贴或拖入截图即可插图'
+            t('editor.hint')
           )}
         </span>
         <div className="ml-auto flex items-center gap-1.5">

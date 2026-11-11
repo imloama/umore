@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -50,17 +51,17 @@ type LoginRequest struct {
 func (h *AuthHandler) SendCode(c *gin.Context) {
 	var req SendCodeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "邮箱必填"})
+		fail(c, http.StatusBadRequest, codeEmailRequired, "email is required")
 		return
 	}
 
 	email := normalizeEmail(req.Email)
 	if !isEmail(email) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "邮箱格式不对"})
+		fail(c, http.StatusBadRequest, codeEmailInvalid, "invalid email")
 		return
 	}
 	if h.Verify == nil || !h.Verify.Available() {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "邮件服务未配置，无法发送验证码"})
+		fail(c, http.StatusServiceUnavailable, codeMailNotConfigured, "mail service not configured")
 		return
 	}
 
@@ -68,22 +69,23 @@ func (h *AuthHandler) SendCode(c *gin.Context) {
 	switch {
 	case err == nil:
 		c.JSON(http.StatusOK, gin.H{
-			"message":      "验证码已发送",
+			"code":         "ok",
+			"message":      "verification code sent",
 			"resend_after": int(h.Verify.Interval.Seconds()),
 			"expires_in":   int(h.Verify.TTL.Seconds()),
 			"code_length":  h.Verify.Digits,
 			"delivery":     h.Verify.DeliveryMode(),
 		})
 	case errors.Is(err, repository.ErrEmailTaken):
-		c.JSON(http.StatusConflict, gin.H{"error": "该邮箱已注册"})
+		fail(c, http.StatusConflict, codeEmailTaken, "email already registered")
 	case errors.Is(err, verification.ErrTooFrequent):
-		c.JSON(http.StatusTooManyRequests, gin.H{"error": err.Error()})
+		fail(c, http.StatusTooManyRequests, codeCodeTooFrequent, err.Error())
 	case errors.Is(err, verification.ErrNotConfigured):
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "邮件服务未配置，无法发送验证码"})
+		fail(c, http.StatusServiceUnavailable, codeMailNotConfigured, "mail service not configured")
 	default:
 		// 发信失败的具体原因（key 无效、域名未验证等）只写日志，别糊给用户
 		log.Printf("send-code %s failed: %v", email, err)
-		c.JSON(http.StatusBadGateway, gin.H{"error": "验证码发送失败，请稍后重试"})
+		fail(c, http.StatusBadGateway, codeMailSendFailed, "failed to send verification code")
 	}
 }
 
@@ -92,64 +94,65 @@ func (h *AuthHandler) SendCode(c *gin.Context) {
 func (h *AuthHandler) Register(c *gin.Context) {
 	var req RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "邮箱、密码、验证码必填，密码至少 8 位"})
+		fail(c, http.StatusBadRequest, codeMissingField, "email, password and code are required")
 		return
 	}
 
 	email := normalizeEmail(req.Email)
 	if !isEmail(email) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "邮箱格式不对"})
+		fail(c, http.StatusBadRequest, codeEmailInvalid, "invalid email")
 		return
 	}
 
 	existing, err := h.Repo.GetUserByEmail(email)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "database error"})
+		fail(c, http.StatusInternalServerError, codeInternal, "database error")
 		return
 	}
 	if existing != nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "该邮箱已注册"})
+		fail(c, http.StatusConflict, codeEmailTaken, "email already registered")
 		return
 	}
 
 	// 先校验证书，再动密码哈希：码不对不该在库里留下任何东西
 	if h.Verify == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "邮件服务未配置，无法验证邮箱"})
+		fail(c, http.StatusServiceUnavailable, codeMailNotConfigured, "mail service not configured")
 		return
 	}
 	if err := h.Verify.VerifyRegisterCode(c.Request.Context(), email, req.Code); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		fail(c, http.StatusBadRequest, codeCodeWrong, err.Error())
 		return
 	}
 
 	salt, err := crypto.GenerateSalt()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate salt"})
+		fail(c, http.StatusInternalServerError, codeInternal, "failed to generate salt")
 		return
 	}
 	user, err := h.Repo.CreateUser(email, crypto.HashPassword(req.Password, salt), salt, true)
 	if err != nil {
 		// 并发重复提交时唯一索引会挡下第二次，这里翻译成「已注册」而不是 500
 		if existing, e := h.Repo.GetUserByEmail(email); e == nil && existing != nil {
-			c.JSON(http.StatusConflict, gin.H{"error": "该邮箱已注册"})
+			fail(c, http.StatusConflict, codeEmailTaken, "email already registered")
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create user"})
+		fail(c, http.StatusInternalServerError, codeInternal, "failed to create user")
 		return
 	}
 
 	if h.Sessions == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "登录服务未初始化"})
+		fail(c, http.StatusServiceUnavailable, codeInternal, "session service unavailable")
 		return
 	}
 	// 注册完直接签发 token，前端不必再登一次
 	token, expiresAt, err := h.Sessions.Issue(c.Request.Context(), user.ID, user.Email)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to issue session"})
+		fail(c, http.StatusInternalServerError, codeInternal, "failed to issue session")
 		return
 	}
 
 	c.JSON(http.StatusCreated, gin.H{
+		"code":       "ok",
 		"message":    "register successful",
 		"user":       user,
 		"token":      token,
@@ -161,38 +164,39 @@ func (h *AuthHandler) Register(c *gin.Context) {
 func (h *AuthHandler) Login(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "邮箱和密码必填"})
+		fail(c, http.StatusBadRequest, codeMissingField, "email and password are required")
 		return
 	}
 
 	email := normalizeEmail(req.Email)
 	user, err := h.Repo.GetUserByEmail(email)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "database error"})
+		fail(c, http.StatusInternalServerError, codeInternal, "database error")
 		return
 	}
 
 	if user == nil {
 		// 邮箱不存在与密码错误返回同一句话，避免把注册情况漏出去
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "邮箱或密码不正确"})
+		fail(c, http.StatusUnauthorized, codePasswordWrong, "email or password is incorrect")
 		return
 	}
 	if crypto.HashPassword(req.Password, user.PasswordSalt) != user.PasswordHash {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "邮箱或密码不正确"})
+		fail(c, http.StatusUnauthorized, codePasswordWrong, "email or password is incorrect")
 		return
 	}
 
 	if h.Sessions == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "登录服务未初始化"})
+		fail(c, http.StatusServiceUnavailable, codeInternal, "session service unavailable")
 		return
 	}
 	token, expiresAt, err := h.Sessions.Issue(c.Request.Context(), user.ID, user.Email)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to issue session"})
+		fail(c, http.StatusInternalServerError, codeInternal, "failed to issue session")
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
+		"code":       "ok",
 		"message":    "login successful",
 		"user":       user,
 		"token":      token,
@@ -204,11 +208,12 @@ func (h *AuthHandler) Login(c *gin.Context) {
 func (h *AuthHandler) CheckSetup(c *gin.Context) {
 	count, err := h.Repo.CountUsers()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "database error"})
+		fail(c, http.StatusInternalServerError, codeInternal, "database error")
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
+		"code":            "ok",
 		"setup_completed": count > 0,
 		"has_users":       count > 0,
 	})
@@ -243,7 +248,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 	}
 	token := bearerToken(c.GetHeader("Authorization"))
 	if err := h.Sessions.Revoke(c.Request.Context(), token); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to revoke session"})
+		fail(c, http.StatusInternalServerError, codeInternal, "failed to revoke session")
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "logged out"})
@@ -253,11 +258,11 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 func (h *AuthHandler) Me(c *gin.Context) {
 	user, err := h.Repo.GetUser(userID(c))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "database error"})
+		fail(c, http.StatusInternalServerError, codeInternal, "database error")
 		return
 	}
 	if user == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": auth.ErrInvalidToken.Error()})
+		fail(c, http.StatusUnauthorized, codeUnauthorized, "invalid or expired token")
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"user": user})
@@ -274,17 +279,17 @@ type UpdateProfileRequest struct {
 func (h *AuthHandler) UpdateProfile(c *gin.Context) {
 	var req UpdateProfileRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "参数格式不对"})
+		fail(c, http.StatusBadRequest, codeInvalidParams, "invalid request body")
 		return
 	}
 
 	user, err := h.Repo.GetUser(userID(c))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "database error"})
+		fail(c, http.StatusInternalServerError, codeInternal, "database error")
 		return
 	}
 	if user == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": auth.ErrInvalidToken.Error()})
+		fail(c, http.StatusUnauthorized, codeUnauthorized, "invalid or expired token")
 		return
 	}
 
@@ -293,7 +298,7 @@ func (h *AuthHandler) UpdateProfile(c *gin.Context) {
 	if nickname == "" {
 		nickname = user.Nickname
 	} else if n := utf8.RuneCountInString(nickname); n > 32 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "昵称最多 32 个字"})
+		fail(c, http.StatusBadRequest, codeNicknameTooLong, "nickname is too long (max 32)")
 		return
 	}
 	avatar := req.Avatar
@@ -322,38 +327,38 @@ type ChangePasswordRequest struct {
 func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	var req ChangePasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "原密码必填，新密码至少 8 位"})
+		fail(c, http.StatusBadRequest, codePasswordTooShort, "old password required, new password must be at least 8 characters")
 		return
 	}
 
 	user, err := h.Repo.GetUser(userID(c))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "database error"})
+		fail(c, http.StatusInternalServerError, codeInternal, "database error")
 		return
 	}
 	if user == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": auth.ErrInvalidToken.Error()})
+		fail(c, http.StatusUnauthorized, codeUnauthorized, "invalid or expired token")
 		return
 	}
 	if crypto.HashPassword(req.OldPassword, user.PasswordSalt) != user.PasswordHash {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "原密码不正确"})
+		fail(c, http.StatusBadRequest, codePasswordWrong, "old password is incorrect")
 		return
 	}
 	if req.OldPassword == req.NewPassword {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "新密码与原密码相同"})
+		fail(c, http.StatusBadRequest, codePasswordSame, "new password is the same as the old one")
 		return
 	}
 
 	salt, err := crypto.GenerateSalt()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate salt"})
+		fail(c, http.StatusInternalServerError, codeInternal, "failed to generate salt")
 		return
 	}
 	if err := h.Repo.UpdatePassword(user.ID, crypto.HashPassword(req.NewPassword, salt), salt); err != nil {
 		respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "密码已更新"})
+	c.JSON(http.StatusOK, gin.H{"message": "password updated", "code": "ok"})
 }
 
 // UploadAvatar POST /api/auth/avatar (multipart, 字段名 file)
@@ -361,47 +366,52 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 func (h *AuthHandler) UploadAvatar(c *gin.Context) {
 	file, err := c.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "file is required"})
+		fail(c, http.StatusBadRequest, codeFileRequired, "file is required")
 		return
 	}
 	if file.Size > maxUploadBytes {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "file too large (max 10MB)"})
+		fail(c, http.StatusBadRequest, codeFileTooLarge, "file too large (max 10MB)")
 		return
 	}
 
 	src, err := file.Open()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read file"})
+		fail(c, http.StatusInternalServerError, codeFileReadFailed, "failed to read file")
 		return
 	}
 	defer src.Close()
 
-	// 只认文件头，不信任客户端给的扩展名
+	// 只认文件头，不信任客户端给的扩展名（顺手摘掉 "; charset=..."）
 	head := make([]byte, 512)
 	n, _ := src.Read(head)
-	mime := http.DetectContentType(head[:n])
+	mime := baseMimeType(http.DetectContentType(head[:n]))
 	ext, ok := allowedImageTypes[mime]
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "only png/jpeg/gif/webp images are allowed"})
+		fail(c, http.StatusBadRequest, codeFileTypeRejected, "only png/jpeg/gif/webp images are allowed")
 		return
 	}
 	if _, err := src.Seek(0, 0); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read file"})
+		fail(c, http.StatusInternalServerError, codeFileReadFailed, "failed to read file")
 		return
 	}
 
-	dir := filepath.Join(h.UploadDir, "avatars")
+	// 头像按用户分目录：uploads/avatars/<user_id>/xxx.png。
+	// 这里不覆盖旧文件，换了头像旧图留在原地（没有引用它的地方了，留着也不碍事）。
+	uid := userID(c)
+	sub := filepath.Join("avatars", strconv.Itoa(uid))
+	dir := filepath.Join(h.UploadDir, sub)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create avatar dir"})
+		fail(c, http.StatusInternalServerError, codeFileSaveFailed, "failed to create avatar dir")
 		return
 	}
-	name := fmt.Sprintf("%d-%d%s", userID(c), time.Now().UnixNano(), ext)
+	name := fmt.Sprintf("%d%s", time.Now().UnixNano(), ext)
 	if err := c.SaveUploadedFile(file, filepath.Join(dir, name)); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save file"})
+		fail(c, http.StatusInternalServerError, codeFileSaveFailed, "failed to save file")
 		return
 	}
 
-	urlPath := "/uploads/avatars/" + name
+	// 头像仍是公开静态资源（<img> 带不了鉴权头），但它不是「附件」，走 /uploads/avatars
+	urlPath := "/uploads/avatars/" + strconv.Itoa(uid) + "/" + name
 	if err := h.Repo.SetAvatar(userID(c), urlPath); err != nil {
 		respondError(c, err)
 		return

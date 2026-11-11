@@ -18,7 +18,7 @@ func (h *FinanceHandler) GetByRange(c *gin.Context) {
 	endDate := c.Query("end_date")
 
 	if startDate == "" || endDate == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "start_date and end_date required"})
+		fail(c, http.StatusBadRequest, codeDateRangeRequired, "start_date and end_date required")
 		return
 	}
 
@@ -36,7 +36,7 @@ func (h *FinanceHandler) GetSummary(c *gin.Context) {
 	endDate := c.Query("end_date")
 
 	if startDate == "" || endDate == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "start_date and end_date required"})
+		fail(c, http.StatusBadRequest, codeDateRangeRequired, "start_date and end_date required")
 		return
 	}
 
@@ -52,7 +52,7 @@ func (h *FinanceHandler) GetSummary(c *gin.Context) {
 func (h *FinanceHandler) Create(c *gin.Context) {
 	var finance model.Finance
 	if err := c.ShouldBindJSON(&finance); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		fail(c, http.StatusBadRequest, codeInvalidParams, err.Error())
 		return
 	}
 
@@ -68,7 +68,7 @@ func (h *FinanceHandler) Update(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
 	var finance model.Finance
 	if err := c.ShouldBindJSON(&finance); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		fail(c, http.StatusBadRequest, codeInvalidParams, err.Error())
 		return
 	}
 	finance.ID = id

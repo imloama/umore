@@ -29,7 +29,7 @@ func (h *TaskHandler) GetAll(c *gin.Context) {
 	if idStr := c.Query("project_id"); idStr != "" {
 		id, err := strconv.Atoi(idStr)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid project_id"})
+			fail(c, http.StatusBadRequest, codeProjectNotFound, "invalid project_id")
 			return
 		}
 		filter.ProjectID = &id
@@ -46,7 +46,7 @@ func (h *TaskHandler) GetAll(c *gin.Context) {
 func (h *TaskHandler) GetOne(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		fail(c, http.StatusBadRequest, codeInvalidID, "invalid id")
 		return
 	}
 	task, err := h.Repo.GetTask(userID(c), id)
@@ -55,7 +55,7 @@ func (h *TaskHandler) GetOne(c *gin.Context) {
 		return
 	}
 	if task == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
+		fail(c, http.StatusNotFound, codeTaskNotFound, "task not found")
 		return
 	}
 	c.JSON(http.StatusOK, task)
@@ -64,11 +64,11 @@ func (h *TaskHandler) GetOne(c *gin.Context) {
 func (h *TaskHandler) Create(c *gin.Context) {
 	var task model.Task
 	if err := c.ShouldBindJSON(&task); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		fail(c, http.StatusBadRequest, codeInvalidParams, err.Error())
 		return
 	}
 	if task.Title == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "title is required"})
+		fail(c, http.StatusBadRequest, codeTaskTitleRequired, "title is required")
 		return
 	}
 	if task.IsToday {
@@ -90,7 +90,7 @@ func (h *TaskHandler) Create(c *gin.Context) {
 func (h *TaskHandler) Update(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		fail(c, http.StatusBadRequest, codeInvalidID, "invalid id")
 		return
 	}
 	existing, err := h.Repo.GetTask(userID(c), id)
@@ -99,13 +99,13 @@ func (h *TaskHandler) Update(c *gin.Context) {
 		return
 	}
 	if existing == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
+		fail(c, http.StatusNotFound, codeTaskNotFound, "task not found")
 		return
 	}
 
 	var task model.Task
 	if err := c.ShouldBindJSON(&task); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		fail(c, http.StatusBadRequest, codeInvalidParams, err.Error())
 		return
 	}
 	task.ID = id
@@ -129,7 +129,7 @@ func (h *TaskHandler) Update(c *gin.Context) {
 func (h *TaskHandler) Delete(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		fail(c, http.StatusBadRequest, codeInvalidID, "invalid id")
 		return
 	}
 	if err := h.Repo.DeleteTask(userID(c), id); err != nil {
@@ -143,14 +143,14 @@ func (h *TaskHandler) Delete(c *gin.Context) {
 func (h *TaskHandler) SetToday(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		fail(c, http.StatusBadRequest, codeInvalidID, "invalid id")
 		return
 	}
 	var req struct {
 		IsToday bool `json:"is_today"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		fail(c, http.StatusBadRequest, codeInvalidParams, err.Error())
 		return
 	}
 
@@ -168,7 +168,7 @@ func (h *TaskHandler) SetToday(c *gin.Context) {
 	}
 	task, err := h.Repo.GetTask(userID(c), id)
 	if err != nil || task == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reload task"})
+		fail(c, http.StatusInternalServerError, codeReloadFailed, "failed to reload task")
 		return
 	}
 	c.JSON(http.StatusOK, task)
@@ -181,7 +181,7 @@ func (h *TaskHandler) ReorderToday(c *gin.Context) {
 		TodayOrder int `json:"today_order"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		fail(c, http.StatusBadRequest, codeInvalidParams, err.Error())
 		return
 	}
 	orders := map[int]int{}
@@ -209,7 +209,7 @@ func (h *TaskHandler) Stats(c *gin.Context) {
 func (h *TaskHandler) GetComments(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		fail(c, http.StatusBadRequest, codeInvalidID, "invalid id")
 		return
 	}
 	comments, err := h.Repo.GetComments(userID(c), "task", id)
@@ -224,16 +224,16 @@ func (h *TaskHandler) GetComments(c *gin.Context) {
 func (h *TaskHandler) AddComment(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		fail(c, http.StatusBadRequest, codeInvalidID, "invalid id")
 		return
 	}
 	var comment model.Comment
 	if err := c.ShouldBindJSON(&comment); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		fail(c, http.StatusBadRequest, codeInvalidParams, err.Error())
 		return
 	}
 	if comment.Content == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "content is required"})
+		fail(c, http.StatusBadRequest, codeCommentRequired, "content is required")
 		return
 	}
 	comment.TargetType = "task"
@@ -249,7 +249,7 @@ func (h *TaskHandler) AddComment(c *gin.Context) {
 func (h *TaskHandler) DeleteComment(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		fail(c, http.StatusBadRequest, codeInvalidID, "invalid id")
 		return
 	}
 	if err := h.Repo.DeleteComment(userID(c), id); err != nil {

@@ -190,3 +190,144 @@ func TestReceivableOrdering(t *testing.T) {
 		}
 	}
 }
+
+// 标记已收要落一笔收入流水，项目和财务的「已收」才不是 0（issue #28）
+func TestReceivableDoneSyncsIncome(t *testing.T) {
+	repo := newTestRepo(t)
+	uid := newUser(t, repo, "max@example.com")
+
+	project := &model.Project{Name: "门店预约系统", Status: "active", Amount: model.Money("60000")}
+	if err := repo.CreateProject(uid, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	item := &model.Receivable{ProjectID: &project.ID, Title: "首付款", Amount: model.Money("18000")}
+	if err := repo.CreateReceivable(uid, item); err != nil {
+		t.Fatalf("create receivable: %v", err)
+	}
+
+	// 没标记已收前不该有流水
+	before, _ := repo.GetProject(uid, project.ID)
+	if !before.Received.IsZero() {
+		t.Fatalf("未收的收款计划不该算进已收: %+v", before)
+	}
+
+	if err := repo.SetReceivableStatus(uid, item.ID, true); err != nil {
+		t.Fatalf("set status: %v", err)
+	}
+	got, _ := repo.GetProject(uid, project.ID)
+	if !got.Received.Equal(model.Money("18000").Decimal) {
+		t.Fatalf("标记已收后项目已收不对: %s", got.Received)
+	}
+
+	today := time.Now().Format("2006-01-02")
+	sum, _ := repo.GetFinanceSummary(uid, today, today)
+	if !sum.TotalIncome.Equal(model.Money("18000").Decimal) {
+		t.Fatalf("财务总收入没跟着更新: %s", sum.TotalIncome)
+	}
+
+	// 重复标记已收不能加第二笔
+	if err := repo.SetReceivableStatus(uid, item.ID, true); err != nil {
+		t.Fatalf("set status again: %v", err)
+	}
+	again, _ := repo.GetProject(uid, project.ID)
+	if !again.Received.Equal(model.Money("18000").Decimal) {
+		t.Fatalf("重复标记已收把金额加了两遍: %s", again.Received)
+	}
+
+	// 已收的那笔改金额，流水要跟着改
+	item.Title = "首付款（补差）"
+	item.Amount = model.Money("20000")
+	if err := repo.UpdateReceivable(uid, item); err != nil {
+		t.Fatalf("update receivable: %v", err)
+	}
+	edited, _ := repo.GetProject(uid, project.ID)
+	if !edited.Received.Equal(model.Money("20000").Decimal) {
+		t.Fatalf("改金额后流水没跟上: %s", edited.Received)
+	}
+
+	// 撤回已收 -> 流水一起撤掉
+	if err := repo.SetReceivableStatus(uid, item.ID, false); err != nil {
+		t.Fatalf("revert status: %v", err)
+	}
+	back, _ := repo.GetProject(uid, project.ID)
+	if !back.Received.IsZero() {
+		t.Fatalf("撤回已收后项目已收应该归零: %s", back.Received)
+	}
+
+	// 重新标记 -> 再记一笔；删除收款计划 -> 流水跟着删
+	if err := repo.SetReceivableStatus(uid, item.ID, true); err != nil {
+		t.Fatalf("set status: %v", err)
+	}
+	if err := repo.DeleteReceivable(uid, item.ID); err != nil {
+		t.Fatalf("delete receivable: %v", err)
+	}
+	left, _ := repo.GetProject(uid, project.ID)
+	if !left.Received.IsZero() {
+		t.Fatalf("删掉已收的收款计划后流水应该一起删: %s", left.Received)
+	}
+}
+
+// 撤回已收不能误删手记的收入流水
+func TestReceivableRevertKeepsManualIncome(t *testing.T) {
+	repo := newTestRepo(t)
+	uid := newUser(t, repo, "max@example.com")
+
+	project := &model.Project{Name: "跨境电商小程序", Status: "active", Amount: model.Money("90000")}
+	if err := repo.CreateProject(uid, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	manual := &model.Finance{Type: "income", Amount: model.Money("5000"), Category: "定金",
+		Date: "2026-11-01", ProjectID: &project.ID}
+	if err := repo.CreateFinance(uid, manual); err != nil {
+		t.Fatalf("create finance: %v", err)
+	}
+
+	item := &model.Receivable{ProjectID: &project.ID, Title: "尾款", Amount: model.Money("10000")}
+	if err := repo.CreateReceivable(uid, item); err != nil {
+		t.Fatalf("create receivable: %v", err)
+	}
+	if err := repo.SetReceivableStatus(uid, item.ID, true); err != nil {
+		t.Fatalf("set status: %v", err)
+	}
+	if err := repo.SetReceivableStatus(uid, item.ID, false); err != nil {
+		t.Fatalf("revert status: %v", err)
+	}
+
+	got, _ := repo.GetProject(uid, project.ID)
+	if !got.Received.Equal(model.Money("5000").Decimal) {
+		t.Fatalf("撤回时误删了手记的收入: %s", got.Received)
+	}
+}
+
+// 老库里的「已收」没留下流水，启动补账后要能算出已收，且重复跑不加重
+func TestBackfillReceivableIncome(t *testing.T) {
+	repo := newTestRepo(t)
+	uid := newUser(t, repo, "max@example.com")
+
+	project := &model.Project{Name: "老单子", Status: "active", Amount: model.Money("50000")}
+	if err := repo.CreateProject(uid, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	old := &model.Receivable{ProjectID: &project.ID, Title: "老首款",
+		Amount: model.Money("12000"), Status: "done"}
+	if err := repo.CreateReceivable(uid, old); err != nil {
+		t.Fatalf("create receivable: %v", err)
+	}
+
+	if err := repo.Migrate(); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	got, _ := repo.GetProject(uid, project.ID)
+	if !got.Received.Equal(model.Money("12000").Decimal) {
+		t.Fatalf("补账后项目已收不对: %s", got.Received)
+	}
+
+	// 再跑一次迁移不能又加一笔
+	if err := repo.Migrate(); err != nil {
+		t.Fatalf("migrate again: %v", err)
+	}
+	again, _ := repo.GetProject(uid, project.ID)
+	if !again.Received.Equal(model.Money("12000").Decimal) {
+		t.Fatalf("重复补账把金额加了两遍: %s", again.Received)
+	}
+}

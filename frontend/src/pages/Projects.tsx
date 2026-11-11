@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { CalendarClock, Coins, FolderKanban, Pencil, Plus, ScrollText, Search, Timer, Trash, Wallet } from 'lucide-react'
-import { projectApi } from '../services/api'
+import { errorCodeOf, projectApi } from '../services/api'
 import type { Project } from '../types'
+import { useI18n } from '@/i18n'
 import PageHeader from '../components/PageHeader'
 import ProjectDetail from '../components/ProjectDetail'
 import { Badge } from '@/components/ui/badge'
@@ -28,6 +29,7 @@ const emptyForm = (): Partial<Project> => ({
 })
 
 export default function Projects() {
+  const { t, te } = useI18n()
   const [projects, setProjects] = useState<Project[]>([])
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState<Partial<Project>>(emptyForm())
@@ -37,6 +39,7 @@ export default function Projects() {
   const [detailTab, setDetailTab] = useState('overview')
   // 编辑金额时顺手填变更说明，后端会落一条金额变更记录
   const [amountReason, setAmountReason] = useState('')
+  const [formError, setFormError] = useState('')
 
   const [searchParams, setSearchParams] = useSearchParams()
 
@@ -80,20 +83,24 @@ export default function Projects() {
       setShowForm(false)
       setForm(emptyForm())
       setAmountReason('')
+      setFormError('')
       loadProjects()
     } catch (error) {
       console.error('Failed to save project:', error)
+      const { code } = errorCodeOf(error)
+      setFormError(code ? te(code) : t('common.saveFailed'))
     }
   }
 
   const edit = (project: Project) => {
     setForm({ ...project })
     setAmountReason('')
+    setFormError('')
     setShowForm(true)
   }
 
   const remove = async (id: number) => {
-    if (!confirm('确定删除该项目？关联任务会保留但不再归属任何项目。')) return
+    if (!confirm(t('project.confirmDelete'))) return
     try {
       await projectApi.remove(id)
       loadProjects()
@@ -132,18 +139,18 @@ export default function Projects() {
     <div>
       <PageHeader
         eyebrow="PROJECTS"
-        title="项目"
-        description="合同金额、已收款、累计投入都在这儿。中途加钱砍范围，记一笔金额变更。"
+        title={t('project.title')}
+        description={t('project.description')}
         actions={
           <>
             {archivedCount > 0 && (
               <Button variant="outline" size="sm" onClick={() => setShowArchived(v => !v)}>
-                {showArchived ? '隐藏归档' : `显示归档 (${archivedCount})`}
+                {showArchived ? t('project.hideArchived') : t('project.showArchived', { n: archivedCount })}
               </Button>
             )}
             <Button onClick={() => { setForm(emptyForm()); setShowForm(true) }}>
               <Plus />
-              新增项目
+              {t('project.new')}
             </Button>
           </>
         }
@@ -151,44 +158,44 @@ export default function Projects() {
 
       <div className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         <Card className="px-4 py-3">
-          <div className="text-[11px] text-muted-foreground">项目数</div>
+          <div className="text-[11px] text-muted-foreground">{t('project.count')}</div>
           <div className="tabular mt-1 text-2xl font-semibold">{filtered.length}</div>
         </Card>
         <Card className="px-4 py-3">
-          <div className="text-[11px] text-muted-foreground">关联任务</div>
+          <div className="text-[11px] text-muted-foreground">{t('project.linkedTasks')}</div>
           <div className="tabular mt-1 text-2xl font-semibold">{totalTasks}</div>
         </Card>
         <Card className="border-amber-200 bg-amber-50/40 px-4 py-3">
           <div className="flex items-center gap-1 text-[11px] text-amber-700">
             <Timer className="size-3" />
-            累计投入
+            {t('project.invested')}
           </div>
           <div className="tabular mt-1 text-2xl font-semibold text-amber-700">{formatHours(totalHours) || '0h'}</div>
         </Card>
         <Card className="px-4 py-3">
           <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
             <Coins className="size-3" />
-            合同合计
+            {t('project.contractTotal')}
           </div>
           <div className="tabular mt-1 text-2xl font-semibold">{money(totalAmount)}</div>
         </Card>
         <Card className="border-emerald-200 bg-emerald-50/40 px-4 py-3">
           <div className="flex items-center gap-1 text-[11px] text-emerald-700">
             <Wallet className="size-3" />
-            已收款
+            {t('project.received')}
           </div>
           <div className="tabular mt-1 text-2xl font-semibold text-emerald-700">{money(totalReceived)}</div>
           <div className="mt-0.5 text-[10.5px] text-emerald-700/80">
-            未收 {money(totalUnpaid)}
+            {t('project.unreceived', { amount: money(totalUnpaid) })}
           </div>
         </Card>
         <Card className="border-amber-200 bg-amber-50/40 px-4 py-3">
           <div className="flex items-center gap-1 text-[11px] text-amber-700">
             <CalendarClock className="size-3" />
-            待收款计划
+            {t('project.receivablePlan')}
           </div>
           <div className="tabular mt-1 text-2xl font-semibold text-amber-700">{money(totalPending)}</div>
-          <div className="mt-0.5 text-[10.5px] text-amber-700/80">按到期时间在回款页跟进</div>
+          <div className="mt-0.5 text-[10.5px] text-amber-700/80">{t('project.receivablePlanHint')}</div>
         </Card>
       </div>
 
@@ -197,7 +204,7 @@ export default function Projects() {
           <div className="relative flex-1">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
-              placeholder="搜索项目名、客户"
+              placeholder={t('project.searchPlaceholder')}
               value={keyword}
               onChange={e => setKeyword(e.target.value)}
               className="pl-8"
@@ -209,8 +216,8 @@ export default function Projects() {
       {filtered.length === 0 ? (
         <Card className="flex flex-col items-center justify-center gap-2 px-6 py-14 text-center">
           <FolderKanban className="size-6 text-muted-foreground/60" />
-          <div className="text-sm font-medium">没有匹配的项目</div>
-          <div className="text-xs text-muted-foreground">商机赢了之后，在这里开单。</div>
+          <div className="text-sm font-medium">{t('project.empty')}</div>
+          <div className="text-xs text-muted-foreground">{t('project.emptyHint')}</div>
         </Card>
       ) : (
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -231,18 +238,18 @@ export default function Projects() {
                           setDetail(project)
                         }}
                         className="truncate text-left text-[14px] font-semibold hover:text-primary"
-                        title="查看详情 / 金额变更 / 项目记录"
+                        title={t('project.detail.overview')}
                       >
                         {project.name}
                       </button>
-                      {project.status === 'archived' && <Badge variant="muted">已归档</Badge>}
+                      {project.status === 'archived' && <Badge variant="muted">{t('project.archived')}</Badge>}
                     </div>
                     <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
-                      {project.customer || '未填客户'}
+                      {project.customer || t('project.noCustomer')}
                     </div>
                   </div>
                   <div className="flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-                    <Button variant="ghost" size="icon-sm" onClick={() => edit(project)} title="编辑">
+                    <Button variant="ghost" size="icon-sm" onClick={() => edit(project)} title={t('common.edit')}>
                       <Pencil />
                     </Button>
                     <Button
@@ -250,7 +257,7 @@ export default function Projects() {
                       size="icon-sm"
                       className="text-muted-foreground hover:bg-red-50 hover:text-red-600"
                       onClick={() => remove(project.id!)}
-                      title="删除"
+                      title={t('common.delete')}
                     >
                       <Trash />
                     </Button>
@@ -267,12 +274,14 @@ export default function Projects() {
                   <div className="flex items-baseline justify-between">
                     <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
                       <Timer className="size-3" />
-                      累计投入
+                      {t('project.invested')}
                     </span>
                     <span className="tabular text-[13px] font-semibold text-amber-700">
                       {formatHours(act) || '0h'}
                       {est > 0 && (
-                        <span className="ml-1 text-[11px] font-normal text-muted-foreground">/ 评估 {formatHours(est)}</span>
+                        <span className="ml-1 text-[11px] font-normal text-muted-foreground">
+                          {t('project.estimateLabel', { hours: formatHours(est) })}
+                        </span>
                       )}
                     </span>
                   </div>
@@ -283,10 +292,10 @@ export default function Projects() {
                     />
                   </div>
                   <div className="mt-1.5 flex items-center justify-between text-[11px] text-muted-foreground">
-                    <span>{project.task_count || 0} 个任务</span>
+                    <span>{t('project.taskCount', { n: project.task_count || 0 })}</span>
                     {est > 0 && (
                       <span className={cn('tabular', over && 'font-medium text-red-600')}>
-                        已用 {Math.round((act / est) * 100)}%
+                        {t('project.usedPercent', { n: Math.round((act / est) * 100) })}
                       </span>
                     )}
                   </div>
@@ -294,9 +303,9 @@ export default function Projects() {
 
                 <div className="mt-2.5 flex items-center justify-between rounded-md bg-secondary/40 px-2 py-1.5">
                   <span className="text-[11px] text-muted-foreground">
-                    合同 {project.amount ? money(project.amount) : '未填'}
+                    {project.amount ? t('project.contractLabel', { amount: money(project.amount) }) : t('project.contractUnset')}
                     {!!project.amount_change_count && (
-                      <span className="ml-1 text-[10px]">· 变更 {project.amount_change_count} 次</span>
+                      <span className="ml-1 text-[10px]">{t('project.changeCount', { n: project.amount_change_count })}</span>
                     )}
                   </span>
                   <span className="flex items-center gap-1.5">
@@ -306,7 +315,7 @@ export default function Projects() {
                         (project.received || 0) > 0 ? 'text-emerald-600' : 'text-muted-foreground'
                       )}
                     >
-                      已收 {money(project.received)}
+                      {t('project.receivedLine', { amount: money(project.received) })}
                     </span>
                     {!!project.receivable_count && (
                       <span
@@ -315,7 +324,9 @@ export default function Projects() {
                           project.receivable_overdue_amount ? 'text-red-600' : 'text-amber-600'
                         )}
                       >
-                        {project.receivable_overdue_amount ? '逾期' : '待收'} {money(project.receivable_amount)}
+                        {project.receivable_overdue_amount
+                          ? t('project.overdueLine', { amount: money(project.receivable_amount) })
+                          : t('project.pendingLine', { amount: money(project.receivable_amount) })}
                       </span>
                     )}
                   </span>
@@ -332,7 +343,7 @@ export default function Projects() {
                     }}
                   >
                     <CalendarClock />
-                    收款计划
+                    {t('project.receivableButton')}
                     {!!project.receivable_count && (
                       <span className="tabular ml-0.5 text-amber-600">{project.receivable_count}</span>
                     )}
@@ -347,7 +358,7 @@ export default function Projects() {
                     }}
                   >
                     <ScrollText />
-                    金额变更 · 记录
+                    {t('project.changesButton')}
                   </Button>
                 </div>
 
@@ -363,7 +374,7 @@ export default function Projects() {
                       {project.git_repo.replace(/^https?:\/\//, '')}
                     </a>
                   ) : (
-                    <span>未填仓库</span>
+                    <span>{t('project.noRepo')}</span>
                   )}
                 </div>
               </Card>
@@ -375,33 +386,33 @@ export default function Projects() {
       <Dialog
         open={showForm}
         onClose={() => { setShowForm(false); setForm(emptyForm()) }}
-        title={form.id ? '编辑项目' : '新增项目'}
-        description="填项目名、客户、合同金额就行，环境与账号密码不再往这里塞。"
+        title={form.id ? t('project.editTitle') : t('project.new')}
+        description={t('project.formDescription')}
         footer={
           <>
-            <Button variant="outline" onClick={() => { setShowForm(false); setForm(emptyForm()) }}>取消</Button>
-            <Button type="submit" form="project-form">保存</Button>
+            <Button variant="outline" onClick={() => { setShowForm(false); setForm(emptyForm()) }}>{t('common.cancel')}</Button>
+            <Button type="submit" form="project-form">{t('common.save')}</Button>
           </>
         }
       >
         <form id="project-form" onSubmit={submit} className="space-y-3.5">
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
-              <Label>项目名称 *</Label>
+              <Label>{t('project.field.name')}</Label>
               <Input value={form.name || ''} onChange={e => setForm({ ...form, name: e.target.value })} required />
             </div>
             <div>
-              <Label>客户</Label>
+              <Label>{t('project.field.customer')}</Label>
               <Input value={form.customer || ''} onChange={e => setForm({ ...form, customer: e.target.value })} />
             </div>
           </div>
           <div>
-            <Label>描述</Label>
+            <Label>{t('project.field.description')}</Label>
             <Textarea rows={2} value={form.description || ''} onChange={e => setForm({ ...form, description: e.target.value })} />
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
-              <Label>合同总金额（元）</Label>
+              <Label>{t('project.field.amount')}</Label>
               <Input
                 type="number"
                 step="0.01"
@@ -412,15 +423,15 @@ export default function Projects() {
               />
             </div>
             <div>
-              <Label>状态</Label>
+              <Label>{t('project.field.status')}</Label>
               <Select value={form.status} onChange={e => setForm({ ...form, status: e.target.value as Project['status'] })}>
-                <option value="active">活跃</option>
-                <option value="archived">已归档</option>
+                <option value="active">{t('project.status.active')}</option>
+                <option value="archived">{t('project.status.archived')}</option>
               </Select>
             </div>
           </div>
           <div>
-            <Label>Git 仓库</Label>
+            <Label>{t('project.field.repo')}</Label>
             <Input
               value={form.git_repo || ''}
               onChange={e => setForm({ ...form, git_repo: e.target.value })}
@@ -429,14 +440,15 @@ export default function Projects() {
           </div>
           {form.id ? (
             <div>
-              <Label>金额变更说明</Label>
+              <Label>{t('project.field.amountReason')}</Label>
               <Input
                 value={amountReason}
                 onChange={e => setAmountReason(e.target.value)}
-                placeholder="改了金额就写一句为什么，会落一条变更记录"
+                placeholder={t('project.field.amountReasonPlaceholder')}
               />
             </div>
           ) : null}
+          {formError && <div className="text-[11.5px] text-red-600">{formError}</div>}
         </form>
       </Dialog>
 

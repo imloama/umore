@@ -120,50 +120,107 @@ func (r *Repository) CreateReceivable(userID int, item *model.Receivable) error 
 	return r.db.Create(item).Error
 }
 
-// UpdateReceivable 只更新「记一笔」里的那几个字段，状态另有专门入口
+// UpdateReceivable 只更新「记一笔」里的那几个字段，状态另有专门入口。
+// 已收的那笔改了金额/项目，跟着的流水也要改，不然两边对不上。
 func (r *Repository) UpdateReceivable(userID int, item *model.Receivable) error {
 	if err := r.checkProjectOwnership(userID, item.ProjectID); err != nil {
 		return err
 	}
-	res := r.db.Model(&model.Receivable{}).Where("user_id = ? AND id = ?", userID, item.ID).
-		Select("project_id", "title", "amount", "due_date", "note").Updates(item)
-	if res.Error != nil {
-		return res.Error
-	}
-	if res.RowsAffected == 0 {
-		return gorm.ErrRecordNotFound
-	}
-	return nil
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&model.Receivable{}).Where("user_id = ? AND id = ?", userID, item.ID).
+			Select("project_id", "title", "amount", "due_date", "note").Updates(item)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return tx.Model(&model.Finance{}).Where("user_id = ? AND receivable_id = ?", userID, item.ID).
+			Updates(map[string]any{"amount": item.Amount, "category": item.Title, "project_id": item.ProjectID}).Error
+	})
 }
 
-// SetReceivableStatus 标记已收 / 撤回，done_at 跟着走
+// SetReceivableStatus 标记已收 / 撤回，done_at 跟着走。
+//
+// 「已收」不只是改个状态：标记已收同时落一笔收入流水（project 跟着收款计划走），
+// 撤回就把它删掉。项目的「已收款」、财务页的「总收入」都是按 income 流水汇总的，
+// 只改状态不动流水，界面上就永远是 0（见 issue #28）。
 func (r *Repository) SetReceivableStatus(userID, id int, done bool) error {
-	updates := map[string]any{"status": "pending", "done_at": nil}
-	if done {
-		now := time.Now()
-		updates["status"] = "done"
-		updates["done_at"] = &now
-	}
-	res := r.db.Model(&model.Receivable{}).Where("user_id = ? AND id = ?", userID, id).Updates(updates)
-	if res.Error != nil {
-		return res.Error
-	}
-	if res.RowsAffected == 0 {
-		return gorm.ErrRecordNotFound
-	}
-	return nil
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		var item model.Receivable
+		err := tx.Where("user_id = ? AND id = ?", userID, id).First(&item).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return gorm.ErrRecordNotFound
+		}
+		if err != nil {
+			return err
+		}
+
+		updates := map[string]any{"status": "pending", "done_at": nil}
+		if done {
+			now := time.Now()
+			updates["status"] = "done"
+			updates["done_at"] = &now
+		}
+		if err := tx.Model(&model.Receivable{}).Where("user_id = ? AND id = ?", userID, id).
+			Updates(updates).Error; err != nil {
+			return err
+		}
+
+		if done {
+			if item.Status == "done" {
+				// 重复点「已收」：流水已经在，别再加一笔
+				return nil
+			}
+			return ensureReceivableIncome(tx, userID, item)
+		}
+		// 撤回：只删这笔收款计划记的那条流水，手记的收入不动
+		return tx.Where("user_id = ? AND receivable_id = ?", userID, id).
+			Delete(&model.Finance{}).Error
+	})
 }
 
-// DeleteReceivable 删一笔待收款；不是自己的当作不存在
+// ensureReceivableIncome 给「已收」的收款计划补一条收入流水。
+// 收款计划本身就是「哪笔钱到账了」，收入流水的日期取收到那天（本次 done_at）。
+func ensureReceivableIncome(tx *gorm.DB, userID int, item model.Receivable) error {
+	var existing int64
+	if err := tx.Model(&model.Finance{}).
+		Where("user_id = ? AND receivable_id = ?", userID, item.ID).
+		Count(&existing).Error; err != nil {
+		return err
+	}
+	if existing > 0 {
+		return nil
+	}
+	date := time.Now().Format("2006-01-02")
+	if item.DoneAt != nil {
+		date = item.DoneAt.Format("2006-01-02")
+	}
+	income := &model.Finance{
+		UserID:       userID,
+		Type:         "income",
+		Amount:       item.Amount,
+		Category:     item.Title,
+		Description:  "收款计划到账",
+		Date:         date,
+		ProjectID:    item.ProjectID,
+		ReceivableID: &item.ID,
+	}
+	return tx.Create(income).Error
+}
+
+// DeleteReceivable 删一笔待收款；不是自己的当作不存在，连带删掉它记的收入流水
 func (r *Repository) DeleteReceivable(userID, id int) error {
-	res := r.db.Where("user_id = ? AND id = ?", userID, id).Delete(&model.Receivable{})
-	if res.Error != nil {
-		return res.Error
-	}
-	if res.RowsAffected == 0 {
-		return gorm.ErrRecordNotFound
-	}
-	return nil
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		res := tx.Where("user_id = ? AND id = ?", userID, id).Delete(&model.Receivable{})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return tx.Where("user_id = ? AND receivable_id = ?", userID, id).Delete(&model.Finance{}).Error
+	})
 }
 
 // GetReceivableSummary 顶部三格：未收 / 逾期 / 7 天内到期，外加已收合计。

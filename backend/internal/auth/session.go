@@ -15,7 +15,8 @@ import (
 )
 
 // ErrInvalidToken token 不认（不存在、已过期、已退出）
-var ErrInvalidToken = errors.New("登录状态已失效，请重新登录")
+// 错误文本只用英文：面向用户的提示由前端按 handler 返回的错误码渲染，后端不做多语。
+var ErrInvalidToken = errors.New("invalid or expired session")
 
 // Session 一次登录会话。只存身份与签发时间，
 // 加密密钥仍然由密码派生、只在前端手上一份，后端不留。

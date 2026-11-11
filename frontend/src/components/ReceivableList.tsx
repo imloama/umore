@@ -1,9 +1,10 @@
 import { CalendarClock, Check, Pencil, Trash } from 'lucide-react'
 import type { Receivable } from '../types'
+import { useI18n } from '@/i18n'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { dayOf, dueText, dueTone, money } from './receivableMeta'
+import { dayOf, dueTone, money } from './receivableMeta'
 
 /**
  * 待收款清单。回款页和项目详情的「收款计划」tab 共用一份。
@@ -24,11 +25,24 @@ export default function ReceivableList({
   onDelete: (item: Receivable) => void
   onOpenProject?: (projectId: number) => void
 }) {
+  const { t } = useI18n()
+
+  // 到期描述：逾期的说人话，别让人自己算
+  const dueText = (item: Receivable) => {
+    if (!item.due_date) return t('receivable.due.none')
+    if (item.status === 'done') return item.due_date
+    const left = item.days_left ?? 0
+    if (item.overdue) return t('receivable.due.overdue', { n: Math.abs(left) })
+    if (left === 0) return t('receivable.due.today')
+    if (left === 1) return t('receivable.due.tomorrow')
+    return t('receivable.due.left', { n: left })
+  }
+
   if (items.length === 0) {
     return (
       <div className="flex flex-col items-center gap-1.5 rounded-lg border border-dashed border-border px-4 py-10 text-center">
         <CalendarClock className="size-5 text-muted-foreground/60" />
-        <div className="text-xs text-muted-foreground">这里还是空的。记一笔待收，到期我来提醒你。</div>
+        <div className="text-xs text-muted-foreground">{t('receivable.list.empty')}</div>
       </div>
     )
   }
@@ -45,7 +59,7 @@ export default function ReceivableList({
             <button
               type="button"
               onClick={() => onToggleDone(item)}
-              title={done ? '撤回为未收' : '标记已收'}
+              title={done ? t('receivable.list.markPending') : t('receivable.list.markDone')}
               className={cn(
                 'flex size-4.5 shrink-0 items-center justify-center rounded-full border transition-colors',
                 done
@@ -61,8 +75,8 @@ export default function ReceivableList({
                 <span className={cn('truncate text-[13px] font-medium', done && 'text-muted-foreground line-through')}>
                   {item.title}
                 </span>
-                {!done && item.overdue && <Badge variant="destructive">逾期</Badge>}
-                {done && <Badge variant="success">已收</Badge>}
+                {!done && item.overdue && <Badge variant="destructive">{t('receivable.list.overdueBadge')}</Badge>}
+                {done && <Badge variant="success">{t('receivable.list.doneBadge')}</Badge>}
                 {showProject && item.project_name && (
                   <span
                     role="button"
@@ -81,12 +95,12 @@ export default function ReceivableList({
               <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground">
                 <span className={cn('tabular', dueTone(item))}>
                   {done
-                    ? `到期 ${item.due_date || '—'} · 收到 ${dayOf(item.done_at) || '—'}`
+                    ? t('receivable.list.dueDone', { due: item.due_date || '—', done: dayOf(item.done_at) || '—' })
                     : item.due_date
                       ? `${item.due_date} · ${dueText(item)}`
                       : dueText(item)}
                 </span>
-                {item.note && <span className="truncate">备注：{item.note}</span>}
+                {item.note && <span className="truncate">{t('receivable.list.note', { note: item.note })}</span>}
               </div>
             </button>
 
@@ -95,7 +109,7 @@ export default function ReceivableList({
             </span>
 
             <div className="flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-              <Button variant="ghost" size="icon-sm" onClick={() => onEdit(item)} title="编辑">
+              <Button variant="ghost" size="icon-sm" onClick={() => onEdit(item)} title={t('common.edit')}>
                 <Pencil />
               </Button>
               <Button
@@ -103,7 +117,7 @@ export default function ReceivableList({
                 size="icon-sm"
                 className="text-muted-foreground hover:bg-red-50 hover:text-red-600"
                 onClick={() => onDelete(item)}
-                title="删除"
+                title={t('common.delete')}
               >
                 <Trash />
               </Button>

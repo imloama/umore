@@ -1,8 +1,16 @@
 import * as React from 'react'
+import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
+import { useI18n } from '@/i18n'
 import { cn } from '@/lib/utils'
 
-/** 轻量弹窗：遮罩点击关闭 + Esc 关闭，内容区自己滚动 */
+/**
+ * 轻量弹窗：遮罩点击关闭 + Esc 关闭，内容区自己滚动。
+ *
+ * 一定要 portal 到 document.body：以前直接渲染在调用点，被页面里带 transform /
+ * z-index 的容器一夹，弹窗就钻到侧边栏和内容区底下了。挂到 body 上再配 z-[100]，
+ * 遮罩才是真的「盖住全部」——侧边栏（z-40）、顶栏（z-20）都在这层下面。
+ */
 export function Dialog({
   open,
   onClose,
@@ -20,6 +28,8 @@ export function Dialog({
   children: React.ReactNode
   footer?: React.ReactNode
 }) {
+  const { t } = useI18n()
+
   React.useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
@@ -34,10 +44,10 @@ export function Dialog({
     }
   }, [open, onClose])
 
-  if (!open) return null
+  if (!open || typeof document === 'undefined') return null
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/40 p-4 backdrop-blur-[2px] sm:p-8">
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto bg-slate-950/45 p-4 backdrop-blur-[2px] sm:p-8">
       <div className="absolute inset-0" onClick={onClose} aria-hidden />
       <div
         role="dialog"
@@ -57,7 +67,7 @@ export function Dialog({
               type="button"
               onClick={onClose}
               className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-              aria-label="关闭"
+              aria-label={t('common.close')}
             >
               <X className="size-4" />
             </button>
@@ -66,6 +76,7 @@ export function Dialog({
         <div className="scrollbar-thin max-h-[calc(100vh-13rem)] overflow-y-auto px-5 py-4">{children}</div>
         {footer && <div className="flex justify-end gap-2 border-t border-border px-5 py-3.5">{footer}</div>}
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { Camera, CheckCircle2, LockKeyhole, Mail, UserRound } from 'lucide-react'
-import { authApi, currentUser, storeUser } from '../services/api'
+import { Camera, CheckCircle2, Languages as LanguagesIcon, LockKeyhole, Mail, UserRound } from 'lucide-react'
+import { authApi, currentUser, errorCodeOf, storeUser } from '../services/api'
 import type { AuthUser } from '../types'
+import { LOCALE_LABEL, SUPPORTED_LOCALES, useI18n } from '@/i18n'
 import PageHeader from '../components/PageHeader'
 import Avatar from '../components/Avatar'
 import { Button } from '@/components/ui/button'
@@ -11,6 +12,7 @@ import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 
 export default function Profile() {
+  const { t, te, locale, setLocale } = useI18n()
   const [user, setUser] = useState<AuthUser | null>(currentUser())
   const [nickname, setNickname] = useState(currentUser()?.nickname || '')
   const [profileMsg, setProfileMsg] = useState('')
@@ -43,7 +45,7 @@ export default function Profile() {
     e.preventDefault()
     const next = nickname.trim()
     if (!next) {
-      setProfileErr('昵称不能空着')
+      setProfileErr(t('profile.nicknameEmpty'))
       return
     }
     setSavingProfile(true)
@@ -53,9 +55,10 @@ export default function Profile() {
       const res = await authApi.updateProfile({ nickname: next })
       setUser(res.user)
       storeUser(res.user)
-      setProfileMsg('昵称已保存')
-    } catch (err: any) {
-      setProfileErr(err.response?.data?.error || '保存失败')
+      setProfileMsg(t('profile.nicknameSaved'))
+    } catch (err: unknown) {
+      const { code } = errorCodeOf(err)
+      setProfileErr(code ? te(code) : t('profile.saveFailed'))
     } finally {
       setSavingProfile(false)
     }
@@ -71,9 +74,10 @@ export default function Profile() {
       const next = { ...(user || ({} as AuthUser)), avatar: res.avatar } as AuthUser
       setUser(next)
       storeUser(next)
-      setProfileMsg('头像已更新')
-    } catch (err: any) {
-      setProfileErr(err.response?.data?.error || '头像上传失败（只支持 png/jpeg/gif/webp，10MB 以内）')
+      setProfileMsg(t('profile.avatarUpdated'))
+    } catch (err: unknown) {
+      const { code } = errorCodeOf(err)
+      setProfileErr(code ? te(code) : t('profile.avatarFailed'))
     } finally {
       setUploading(false)
       if (fileRef.current) fileRef.current.value = ''
@@ -85,22 +89,23 @@ export default function Profile() {
     setPwdErr('')
     setPwdMsg('')
     if (newPassword.length < 8) {
-      setPwdErr('新密码至少 8 位')
+      setPwdErr(t('profile.newPasswordTooShort'))
       return
     }
     if (newPassword !== repeatPassword) {
-      setPwdErr('两次输入的新密码不一致')
+      setPwdErr(t('profile.newPasswordMismatch'))
       return
     }
     setSavingPwd(true)
     try {
       await authApi.changePassword(oldPassword, newPassword)
-      setPwdMsg('密码已更新。下次登录用新密码。')
+      setPwdMsg(t('profile.passwordUpdated'))
       setOldPassword('')
       setNewPassword('')
       setRepeatPassword('')
-    } catch (err: any) {
-      setPwdErr(err.response?.data?.error || '改密码失败')
+    } catch (err: unknown) {
+      const { code } = errorCodeOf(err)
+      setPwdErr(code ? te(code) : t('profile.passwordFailed'))
     } finally {
       setSavingPwd(false)
     }
@@ -108,7 +113,7 @@ export default function Profile() {
 
   return (
     <div className="max-w-2xl">
-      <PageHeader eyebrow="PROFILE" title="个人资料" description="改昵称、换头像、换密码都在这儿。" />
+      <PageHeader eyebrow="PROFILE" title={t('profile.title')} description={t('profile.description')} />
 
       <Card className="p-5">
         <div className="flex items-center gap-4">
@@ -119,7 +124,7 @@ export default function Profile() {
               onClick={() => fileRef.current?.click()}
               disabled={uploading}
               className="absolute -bottom-1 -right-1 flex size-6 items-center justify-center rounded-full border border-border bg-card text-muted-foreground shadow-sm transition-colors hover:text-foreground disabled:opacity-50"
-              title="换头像"
+              title={t('profile.changeAvatar')}
             >
               <Camera className="size-3.5" />
             </button>
@@ -137,7 +142,7 @@ export default function Profile() {
               <Mail className="size-3.5 shrink-0" />
               {user?.email || '—'}
             </div>
-            {uploading && <div className="mt-1 text-[11px] text-muted-foreground">上传中…</div>}
+            {uploading && <div className="mt-1 text-[11px] text-muted-foreground">{t('profile.uploading')}</div>}
           </div>
         </div>
 
@@ -147,15 +152,20 @@ export default function Profile() {
           <div>
             <Label>
               <UserRound className="mr-1 inline size-3.5 align-[-2px]" />
-              昵称
+              {t('profile.nickname')}
             </Label>
             <div className="flex gap-2">
-              <Input value={nickname} onChange={e => setNickname(e.target.value)} maxLength={32} placeholder="比如 MORE1" />
+              <Input
+                value={nickname}
+                onChange={e => setNickname(e.target.value)}
+                maxLength={32}
+                placeholder={t('profile.nicknamePlaceholder')}
+              />
               <Button type="submit" disabled={savingProfile || nickname.trim() === (user?.nickname || '')}>
-                保存
+                {t('common.save')}
               </Button>
             </div>
-            <p className="mt-1 text-[11px] text-muted-foreground">注册时默认给一个「MORE + ID」，想改就改，最多 32 个字。</p>
+            <p className="mt-1 text-[11px] text-muted-foreground">{t('profile.nicknameHint')}</p>
           </div>
         </form>
 
@@ -171,11 +181,11 @@ export default function Profile() {
       <Card className="mt-4 p-5">
         <div className="mb-3 flex items-center gap-1.5 text-[13px] font-semibold">
           <LockKeyhole className="size-4 text-muted-foreground" />
-          修改密码
+          {t('profile.changePassword')}
         </div>
         <form onSubmit={savePassword} className="space-y-3">
           <div>
-            <Label htmlFor="old-password">原密码</Label>
+            <Label htmlFor="old-password">{t('profile.oldPassword')}</Label>
             <Input
               id="old-password"
               type="password"
@@ -187,19 +197,19 @@ export default function Profile() {
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
-              <Label htmlFor="new-password">新密码</Label>
+              <Label htmlFor="new-password">{t('profile.newPassword')}</Label>
               <Input
                 id="new-password"
                 type="password"
                 autoComplete="new-password"
                 value={newPassword}
                 onChange={e => setNewPassword(e.target.value)}
-                placeholder="至少 8 位"
+                placeholder={t('auth.passwordPlaceholderRegister')}
                 required
               />
             </div>
             <div>
-              <Label htmlFor="repeat-password">确认新密码</Label>
+              <Label htmlFor="repeat-password">{t('profile.repeatPassword')}</Label>
               <Input
                 id="repeat-password"
                 type="password"
@@ -218,9 +228,31 @@ export default function Profile() {
           )}
           {pwdErr && <div className="text-[12px] text-red-600">{pwdErr}</div>}
           <Button type="submit" disabled={savingPwd}>
-            {savingPwd ? '保存中…' : '更新密码'}
+            {savingPwd ? t('common.saving') : t('profile.updatePassword')}
           </Button>
         </form>
+      </Card>
+
+      {/* 语言只存在这台浏览器上：换设备/换浏览器各记一份，不写数据库 */}
+      <Card className="mt-4 p-5">
+        <div className="mb-3 flex items-center gap-1.5 text-[13px] font-semibold">
+          <LanguagesIcon className="size-4 text-muted-foreground" />
+          {t('profile.language')}
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {SUPPORTED_LOCALES.map(code => (
+            <Button
+              key={code}
+              type="button"
+              variant={locale === code ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setLocale(code)}
+            >
+              {LOCALE_LABEL[code]}
+            </Button>
+          ))}
+        </div>
+        <p className="mt-2 text-[11px] text-muted-foreground">{t('profile.languageHint')}</p>
       </Card>
     </div>
   )

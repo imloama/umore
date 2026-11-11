@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import api, { taskApi } from '../services/api'
-import type { Project, Task, TaskStatus } from '../types'
+import type { Project, Task } from '../types'
+import { useI18n } from '@/i18n'
 import PageHeader from '../components/PageHeader'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -10,13 +11,15 @@ import { Dialog } from '@/components/ui/dialog'
 import { Select } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 import {
-  CATEGORY_LABEL,
+  CATEGORY_KEYS,
+  CATEGORY_ORDER,
   CATEGORY_STYLE,
   PRIORITY_COLOR,
-  PRIORITY_LABEL,
-  STATUS_LABEL,
+  PRIORITY_KEYS,
+  PRIORITY_ORDER,
+  STATUS_KEYS,
   STATUS_ORDER,
-  hoursPair,
+  formatHours,
   todayStr
 } from '../components/taskMeta'
 
@@ -38,7 +41,7 @@ const startOfWeek = (key: string) => {
   d.setDate(d.getDate() - offset)
   return toKey(d)
 }
-const WEEKDAY = ['一', '二', '三', '四', '五', '六', '日']
+const WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0]
 
 interface DayCell {
   key: string
@@ -70,6 +73,7 @@ const buildMonth = (cursor: string, view: 'month' | 'week'): DayCell[] => {
 const taskDate = (task: Task) => task.scheduled_date || task.due_date || ''
 
 export default function Calendar() {
+  const { t } = useI18n()
   const [cursor, setCursor] = useState(todayStr())
   const [view, setView] = useState<'month' | 'week'>('month')
   const [tasks, setTasks] = useState<Task[]>([])
@@ -121,7 +125,7 @@ export default function Calendar() {
     })
     Object.values(map).forEach(list =>
       list.sort((a, b) => {
-        const rank = (t: Task) => (t.status === 'DONE' ? 4 : STATUS_ORDER.indexOf(t.status))
+        const rank = (t2: Task) => (t2.status === 'DONE' ? 4 : STATUS_ORDER.indexOf(t2.status))
         const diff = rank(a) - rank(b)
         return diff !== 0 ? diff : (a.number || 0) - (b.number || 0)
       })
@@ -141,7 +145,7 @@ export default function Calendar() {
   }
 
   const moveTask = async (taskId: number, date: string) => {
-    const task = tasks.find(t => t.id === taskId)
+    const task = tasks.find(t2 => t2.id === taskId)
     if (!task || taskDate(task) === date) return
     try {
       await taskApi.update(taskId, { ...task, scheduled_date: date })
@@ -158,7 +162,9 @@ export default function Calendar() {
 
   const monthLabel = (() => {
     const d = parseKey(cursor)
-    return view === 'month' ? `${d.getFullYear()} 年 ${d.getMonth() + 1} 月` : `${rangeStart} ~ ${rangeEnd}`
+    return view === 'month'
+      ? t('calendar.monthLabel', { year: d.getFullYear(), month: d.getMonth() + 1 })
+      : t('calendar.rangeLabel', { start: rangeStart, end: rangeEnd })
   })()
 
   const selectedTasks = selectedDate ? byDate[selectedDate] || [] : []
@@ -167,8 +173,8 @@ export default function Calendar() {
     <div>
       <PageHeader
         eyebrow="CALENDAR"
-        title="日历"
-        description="拖卡片到别的日期就改排期，没排期的按截止日期落位。"
+        title={t('calendar.title')}
+        description={t('calendar.description')}
         actions={
           <>
             <div className="flex rounded-md border border-input bg-card p-0.5 shadow-sm">
@@ -182,16 +188,16 @@ export default function Calendar() {
                     view === v ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
                   )}
                 >
-                  {v === 'month' ? '月' : '周'}
+                  {v === 'month' ? t('calendar.month') : t('calendar.week')}
                 </button>
               ))}
             </div>
             <div className="flex items-center gap-1">
-              <Button variant="outline" size="icon-sm" onClick={() => shift(-1)} title="上一页">
+              <Button variant="outline" size="icon-sm" onClick={() => shift(-1)} title={t('calendar.prev')}>
                 <ChevronLeft />
               </Button>
-              <Button variant="outline" size="sm" onClick={() => setCursor(todayStr())}>今天</Button>
-              <Button variant="outline" size="icon-sm" onClick={() => shift(1)} title="下一页">
+              <Button variant="outline" size="sm" onClick={() => setCursor(todayStr())}>{t('calendar.today')}</Button>
+              <Button variant="outline" size="icon-sm" onClick={() => shift(1)} title={t('calendar.next')}>
                 <ChevronRight />
               </Button>
             </div>
@@ -202,35 +208,35 @@ export default function Calendar() {
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <span className="tabular mr-1 text-[13px] font-semibold">{monthLabel}</span>
         <Select className="w-auto min-w-[100px]" value={filters.category} onChange={e => setFilters({ ...filters, category: e.target.value })}>
-          <option value="">全部类型</option>
-          {Object.entries(CATEGORY_LABEL).map(([value, label]) => (
-            <option key={value} value={value}>{label}</option>
+          <option value="">{t('task.filter.allCategories')}</option>
+          {CATEGORY_ORDER.map(value => (
+            <option key={value} value={value}>{t(CATEGORY_KEYS[value])}</option>
           ))}
         </Select>
         <Select className="w-auto min-w-[100px]" value={filters.status} onChange={e => setFilters({ ...filters, status: e.target.value })}>
-          <option value="">全部状态</option>
+          <option value="">{t('task.filter.allStatuses')}</option>
           {STATUS_ORDER.map(value => (
-            <option key={value} value={value}>{STATUS_LABEL[value]}</option>
+            <option key={value} value={value}>{t(STATUS_KEYS[value])}</option>
           ))}
         </Select>
         <Select className="w-auto min-w-[108px]" value={filters.priority} onChange={e => setFilters({ ...filters, priority: e.target.value })}>
-          <option value="">全部优先级</option>
-          {Object.entries(PRIORITY_LABEL).map(([value, label]) => (
-            <option key={value} value={value}>{label}</option>
+          <option value="">{t('task.filter.allPriorities')}</option>
+          {PRIORITY_ORDER.map(value => (
+            <option key={value} value={value}>{t(PRIORITY_KEYS[value])}</option>
           ))}
         </Select>
         <Select className="w-auto min-w-[108px]" value={filters.project_id} onChange={e => setFilters({ ...filters, project_id: e.target.value })}>
-          <option value="">全部项目</option>
+          <option value="">{t('task.filter.allProjects')}</option>
           {projects.map(p => (
             <option key={p.id} value={p.id}>{p.name}</option>
           ))}
         </Select>
-        {loading && <span className="text-[11px] text-muted-foreground">加载中…</span>}
+        {loading && <span className="text-[11px] text-muted-foreground">{t('common.loading')}</span>}
       </div>
 
       <Card className="overflow-hidden">
         <div className="grid grid-cols-7 border-b border-border bg-secondary/40">
-          {WEEKDAY.map((w, i) => (
+          {WEEKDAY_ORDER.map((w, i) => (
             <div
               key={w}
               className={cn(
@@ -238,14 +244,15 @@ export default function Calendar() {
                 i >= 5 && 'text-muted-foreground/60'
               )}
             >
-              周{w}
+              {t('calendar.weekPrefix')}
+              {t(`calendar.weekday.${w}` as 'calendar.weekday.1')}
             </div>
           ))}
         </div>
         <div className="grid grid-cols-7">
           {cells.map(cell => {
             const items = byDate[cell.key] || []
-            const done = items.filter(t => t.status === 'DONE').length
+            const done = items.filter(t2 => t2.status === 'DONE').length
             const limit = view === 'week' ? 12 : 3
             return (
               <div
@@ -306,12 +313,16 @@ export default function Calendar() {
                       >
                         <span className="size-1.5 shrink-0 rounded-full" style={{ background: PRIORITY_COLOR[task.priority] }} />
                         <span className="truncate">{task.title}</span>
-                        {task.is_today && <span className="ml-auto shrink-0 rounded bg-white/70 px-1 text-[9px]">今</span>}
+                        {task.is_today && (
+                          <span className="ml-auto shrink-0 rounded bg-white/70 px-1 text-[9px]">
+                            {t('calendar.todayShort')}
+                          </span>
+                        )}
                       </div>
                     )
                   })}
                   {items.length > limit && (
-                    <div className="pl-1 text-[10px] text-muted-foreground">+{items.length - limit} 更多</div>
+                    <div className="pl-1 text-[10px] text-muted-foreground">{t('calendar.more', { n: items.length - limit })}</div>
                   )}
                 </div>
               </div>
@@ -321,22 +332,22 @@ export default function Calendar() {
       </Card>
 
       <div className="mt-3 flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
-        {Object.entries(CATEGORY_LABEL).map(([key, label]) => (
+        {CATEGORY_ORDER.map(key => (
           <span key={key} className="inline-flex items-center gap-1.5">
-            <i className={cn('size-2 rounded-sm', CATEGORY_STYLE[key as keyof typeof CATEGORY_STYLE].dot)} />
-            {label}
+            <i className={cn('size-2 rounded-sm', CATEGORY_STYLE[key].dot)} />
+            {t(CATEGORY_KEYS[key])}
           </span>
         ))}
-        <span className="ml-auto">拖动卡片到其他日期即可改排期 · 点击日期查看当天清单</span>
+        <span className="ml-auto">{t('calendar.legendHint')}</span>
       </div>
 
       <Dialog
         open={!!selectedDate}
         onClose={() => setSelectedDate(null)}
-        title={selectedDate ? `${selectedDate} · ${selectedTasks.length} 项` : ''}
-        footer={<Button variant="outline" onClick={() => setSelectedDate(null)}>关闭</Button>}
+        title={selectedDate ? t('calendar.dayTitle', { date: selectedDate, n: selectedTasks.length }) : ''}
+        footer={<Button variant="outline" onClick={() => setSelectedDate(null)}>{t('common.close')}</Button>}
       >
-        {selectedTasks.length === 0 && <p className="text-xs text-muted-foreground">这天没有安排。</p>}
+        {selectedTasks.length === 0 && <p className="text-xs text-muted-foreground">{t('calendar.noTaskThatDay')}</p>}
         <ul className="divide-y divide-border">
           {selectedTasks.map(task => (
             <li key={task.id} className="flex items-start gap-2.5 py-2.5">
@@ -352,17 +363,19 @@ export default function Calendar() {
                   <span className={cn('text-[13px] font-medium', task.status === 'DONE' && 'text-muted-foreground line-through')}>
                     {task.title}
                   </span>
-                  <Badge className={CATEGORY_STYLE[task.category].badge}>{CATEGORY_LABEL[task.category]}</Badge>
+                  <Badge className={CATEGORY_STYLE[task.category].badge}>{t(CATEGORY_KEYS[task.category])}</Badge>
                 </div>
                 <div className="mt-1 flex flex-wrap items-center gap-x-3 text-[11px] text-muted-foreground">
                   {task.project_name && <span>{task.project_name}</span>}
-                  {task.due_date && <span className="tabular">截止 {task.due_date}</span>}
-                  {hoursPair(task.actual_hours, task.estimated_hours) && (
-                    <span className="tabular text-amber-700">{hoursPair(task.actual_hours, task.estimated_hours)}</span>
+                  {task.due_date && <span className="tabular">{t('taskRow.due', { date: task.due_date })}</span>}
+                  {(formatHours(task.actual_hours) || formatHours(task.estimated_hours)) && (
+                    <span className="tabular text-amber-700">
+                      {formatHours(task.actual_hours) || '0h'} / {formatHours(task.estimated_hours) || t('hours.notSet')}
+                    </span>
                   )}
                 </div>
               </div>
-              <span className="shrink-0 text-[11px] text-muted-foreground">{STATUS_LABEL[task.status as TaskStatus]}</span>
+              <span className="shrink-0 text-[11px] text-muted-foreground">{t(STATUS_KEYS[task.status])}</span>
             </li>
           ))}
         </ul>

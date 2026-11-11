@@ -22,12 +22,12 @@ func RequireAuth(sessions *auth.Manager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := bearerToken(c.GetHeader("Authorization"))
 		if token == "" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": auth.ErrInvalidToken.Error()})
+			fail(c, http.StatusUnauthorized, codeUnauthorized, "invalid or expired token")
 			return
 		}
 		sess, err := sessions.Lookup(c.Request.Context(), token)
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": auth.ErrInvalidToken.Error()})
+			fail(c, http.StatusUnauthorized, codeUnauthorized, "invalid or expired token")
 			return
 		}
 		c.Set(CtxUserID, sess.UserID)

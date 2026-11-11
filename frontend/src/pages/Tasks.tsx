@@ -1,26 +1,29 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { ListFilter, Plus, Search, Timer, X } from 'lucide-react'
-import { labelApi, taskApi } from '../services/api'
+import { labelApi, taskApi, errorCodeOf } from '../services/api'
 import api from '../services/api'
 import type { Label, Project, Task, TaskCategory, TaskPriority, TaskStatus } from '../types'
+import { useI18n } from '@/i18n'
 import TaskDetail from '../components/TaskDetail'
 import TaskRow from '../components/TaskRow'
 import PageHeader from '../components/PageHeader'
 import HoursDelta from '../components/HoursDelta'
+import RichTextEditor from '../components/RichTextEditor'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Dialog } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label as FieldLabel } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
-import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import {
-  CATEGORY_LABEL,
+  CATEGORY_KEYS,
+  CATEGORY_ORDER,
   DEFAULT_LABEL_COLORS,
-  PRIORITY_LABEL,
-  STATUS_LABEL,
+  PRIORITY_KEYS,
+  PRIORITY_ORDER,
+  STATUS_KEYS,
   STATUS_ORDER,
   STATUS_STYLE,
   formatHours,
@@ -46,6 +49,7 @@ const parseHours = (raw: string) => {
 }
 
 export default function Tasks({ todayMode = false }: { todayMode?: boolean }) {
+  const { t, te } = useI18n()
   const [searchParams, setSearchParams] = useSearchParams()
   const [tasks, setTasks] = useState<Task[]>([])
   const [projects, setProjects] = useState<Project[]>([])
@@ -53,6 +57,7 @@ export default function Tasks({ todayMode = false }: { todayMode?: boolean }) {
   const [form, setForm] = useState<Task>(emptyForm())
   const [showForm, setShowForm] = useState(false)
   const [labelInput, setLabelInput] = useState('')
+  const [formError, setFormError] = useState('')
   const [filters, setFilters] = useState({
     category: '',
     status: '',
@@ -69,6 +74,7 @@ export default function Tasks({ todayMode = false }: { todayMode?: boolean }) {
     if (searchParams.get('new') === '1') {
       setForm({ ...emptyForm(), is_today: todayMode })
       setLabelInput('')
+      setFormError('')
       setShowForm(true)
       const next = new URLSearchParams(searchParams)
       next.delete('new')
@@ -135,6 +141,7 @@ export default function Tasks({ todayMode = false }: { todayMode?: boolean }) {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
+    setFormError('')
     try {
       const payload: Task = {
         ...form,
@@ -155,17 +162,20 @@ export default function Tasks({ todayMode = false }: { todayMode?: boolean }) {
       await loadAll()
     } catch (error) {
       console.error('Failed to save task:', error)
+      const { code, message } = errorCodeOf(error)
+      setFormError(te(code, message))
     }
   }
 
   const edit = (task: Task) => {
     setForm({ ...task })
     setLabelInput((task.labels || []).map(l => l.name).join(', '))
+    setFormError('')
     setShowForm(true)
   }
 
   const remove = async (id: number) => {
-    if (!confirm('确定删除该任务?')) return
+    if (!confirm(t('task.confirmDelete'))) return
     await taskApi.remove(id)
     await loadAll()
   }
@@ -182,6 +192,12 @@ export default function Tasks({ todayMode = false }: { todayMode?: boolean }) {
 
   const openDetail = (task: Task) => setDetail(task)
 
+  // 列表里点「完成」直接收工，弹窗里的同款按钮走这里再关窗，两边行为一致
+  const completeTask = async (task: Task) => {
+    await changeStatus(task, 'DONE')
+    setDetail(prev => (prev?.id === task.id ? null : prev))
+  }
+
   const doneCount = grouped.DONE?.length || 0
   const progress = tasks.length ? Math.round((doneCount / tasks.length) * 100) : 0
   const todayActual = tasks.reduce((sum, t) => sum + (t.actual_hours || 0), 0)
@@ -197,22 +213,19 @@ export default function Tasks({ todayMode = false }: { todayMode?: boolean }) {
     <div>
       <PageHeader
         eyebrow={todayMode ? 'TODAY' : 'TASKS'}
-        title={todayMode ? `今日 · ${todayStr()}` : '任务'}
-        description={
-          todayMode
-            ? '今天要推进的事都在这里，勾掉一件算一件。'
-            : '待办、问题、需求、商机都在一张表里，靠类型和标签区分。'
-        }
+        title={todayMode ? t('task.titleToday', { date: todayStr() }) : t('task.title')}
+        description={todayMode ? t('task.descriptionToday') : t('task.description')}
         actions={
           <Button
             onClick={() => {
               setForm({ ...emptyForm(), is_today: todayMode })
               setLabelInput('')
+              setFormError('')
               setShowForm(true)
             }}
           >
             <Plus />
-            新建任务
+            {t('task.new')}
           </Button>
         }
       />
@@ -221,30 +234,30 @@ export default function Tasks({ todayMode = false }: { todayMode?: boolean }) {
         <Card className="mb-4 overflow-hidden">
           <div className="grid gap-4 px-4 py-4 sm:grid-cols-[1fr_1fr_1fr_1.4fr]">
             <div>
-              <div className="text-[11px] text-muted-foreground">今日排期</div>
+              <div className="text-[11px] text-muted-foreground">{t('task.stats.scheduled')}</div>
               <div className="tabular mt-1 text-2xl font-semibold">{tasks.length}</div>
             </div>
             <div>
-              <div className="text-[11px] text-muted-foreground">已完成</div>
+              <div className="text-[11px] text-muted-foreground">{t('task.stats.done')}</div>
               <div className="tabular mt-1 text-2xl font-semibold text-emerald-600">
                 {doneCount}
                 <span className="ml-1 text-xs font-normal text-muted-foreground">/ {tasks.length}</span>
               </div>
             </div>
             <div>
-              <div className="text-[11px] text-muted-foreground">完成率</div>
+              <div className="text-[11px] text-muted-foreground">{t('task.stats.rate')}</div>
               <div className="tabular mt-1 text-2xl font-semibold">{progress}%</div>
             </div>
             <div>
               <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
                 <Timer className="size-3" />
-                工时 实际 / 评估
+                {t('task.stats.hours')}
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-2">
                 <span className="tabular text-2xl font-semibold">
                   {formatHours(todayActual) || '0h'}
                   <span className="ml-1 text-xs font-normal text-muted-foreground">
-                    / {formatHours(todayEstimated) || '未评估'}
+                    / {formatHours(todayEstimated) || t('task.stats.notEstimated')}
                   </span>
                 </span>
                 <HoursDelta actual={todayActual} estimated={todayEstimated} />
@@ -263,7 +276,7 @@ export default function Tasks({ todayMode = false }: { todayMode?: boolean }) {
             <div className="relative min-w-[180px] flex-1">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
-                placeholder="搜索标题或内容"
+                placeholder={t('task.filter.keyword')}
                 value={filters.keyword}
                 onChange={e => setFilters({ ...filters, keyword: e.target.value })}
                 className="pl-8"
@@ -274,9 +287,9 @@ export default function Tasks({ todayMode = false }: { todayMode?: boolean }) {
               value={filters.category}
               onChange={e => setFilters({ ...filters, category: e.target.value })}
             >
-              <option value="">全部类型</option>
-              {Object.entries(CATEGORY_LABEL).map(([value, label]) => (
-                <option key={value} value={value}>{label}</option>
+              <option value="">{t('task.filter.allCategories')}</option>
+              {CATEGORY_ORDER.map(value => (
+                <option key={value} value={value}>{t(CATEGORY_KEYS[value])}</option>
               ))}
             </Select>
             <Select
@@ -284,9 +297,9 @@ export default function Tasks({ todayMode = false }: { todayMode?: boolean }) {
               value={filters.status}
               onChange={e => setFilters({ ...filters, status: e.target.value })}
             >
-              <option value="">全部状态</option>
+              <option value="">{t('task.filter.allStatuses')}</option>
               {STATUS_ORDER.map(value => (
-                <option key={value} value={value}>{STATUS_LABEL[value]}</option>
+                <option key={value} value={value}>{t(STATUS_KEYS[value])}</option>
               ))}
             </Select>
             <Select
@@ -294,9 +307,9 @@ export default function Tasks({ todayMode = false }: { todayMode?: boolean }) {
               value={filters.priority}
               onChange={e => setFilters({ ...filters, priority: e.target.value })}
             >
-              <option value="">全部优先级</option>
-              {Object.entries(PRIORITY_LABEL).map(([value, label]) => (
-                <option key={value} value={value}>{label}</option>
+              <option value="">{t('task.filter.allPriorities')}</option>
+              {PRIORITY_ORDER.map(value => (
+                <option key={value} value={value}>{t(PRIORITY_KEYS[value])}</option>
               ))}
             </Select>
             <Select
@@ -304,7 +317,7 @@ export default function Tasks({ todayMode = false }: { todayMode?: boolean }) {
               value={filters.project_id}
               onChange={e => setFilters({ ...filters, project_id: e.target.value })}
             >
-              <option value="">全部项目</option>
+              <option value="">{t('task.filter.allProjects')}</option>
               {projects.map(p => (
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}
@@ -314,7 +327,7 @@ export default function Tasks({ todayMode = false }: { todayMode?: boolean }) {
               value={filters.label}
               onChange={e => setFilters({ ...filters, label: e.target.value })}
             >
-              <option value="">全部标签</option>
+              <option value="">{t('task.filter.allLabels')}</option>
               {labels.map(l => (
                 <option key={l.id} value={l.name}>{l.name}</option>
               ))}
@@ -322,7 +335,7 @@ export default function Tasks({ todayMode = false }: { todayMode?: boolean }) {
             {activeFilterCount > 0 && (
               <Button variant="ghost" size="sm" onClick={resetFilters}>
                 <X />
-                清空 {activeFilterCount}
+                {t('task.filter.clear', { n: activeFilterCount })}
               </Button>
             )}
           </div>
@@ -332,16 +345,16 @@ export default function Tasks({ todayMode = false }: { todayMode?: boolean }) {
       {loading && (
         <div className="flex items-center gap-2 px-1 py-6 text-xs text-muted-foreground">
           <span className="size-3 animate-spin rounded-full border-2 border-border border-t-primary" />
-          加载中…
+          {t('common.loading')}
         </div>
       )}
 
       {!loading && tasks.length === 0 && (
         <Card className="flex flex-col items-center justify-center gap-2 px-6 py-14 text-center">
           <ListFilter className="size-6 text-muted-foreground/60" />
-          <div className="text-sm font-medium">这里还没有任务</div>
+          <div className="text-sm font-medium">{t('task.empty')}</div>
           <div className="text-xs text-muted-foreground">
-            {todayMode ? '去任务列表挑几件加进今日，或者直接新建。' : '点右上角「新建任务」开始记录。'}
+            {todayMode ? t('task.emptyToday') : t('task.emptyList')}
           </div>
         </Card>
       )}
@@ -350,18 +363,21 @@ export default function Tasks({ todayMode = false }: { todayMode?: boolean }) {
         STATUS_ORDER.map(status => {
           const items = grouped[status] || []
           if (items.length === 0) return null
-          const hours = items.reduce((s, t) => s + (t.actual_hours || 0), 0)
-          const estimates = items.reduce((s, t) => s + (t.estimated_hours || 0), 0)
+          const hours = items.reduce((s, t2) => s + (t2.actual_hours || 0), 0)
+          const estimates = items.reduce((s, t2) => s + (t2.estimated_hours || 0), 0)
           return (
             <Card key={status} className="mb-3 overflow-hidden">
               <div className="flex items-center gap-2 border-b border-border bg-secondary/30 px-4 py-2">
                 <span className={cn('rounded-md px-1.5 py-0.5 text-[11px] font-medium', STATUS_STYLE[status])}>
-                  {STATUS_LABEL[status]}
+                  {t(STATUS_KEYS[status])}
                 </span>
                 <span className="tabular text-[11px] text-muted-foreground">{items.length}</span>
                 {(hours > 0 || estimates > 0) && (
                   <span className="tabular ml-auto text-[11px] text-muted-foreground">
-                    工时 {formatHours(hours) || '0h'} / 评估 {formatHours(estimates) || '—'}
+                    {t('task.stats.groupHours', {
+                      actual: formatHours(hours) || '0h',
+                      estimate: formatHours(estimates) || '—'
+                    })}
                   </span>
                 )}
               </div>
@@ -372,6 +388,7 @@ export default function Tasks({ todayMode = false }: { todayMode?: boolean }) {
                     task={task}
                     onOpen={() => openDetail(task)}
                     onToggle={() => changeStatus(task, task.status === 'DONE' ? 'TODO' : 'DONE')}
+                    onComplete={() => completeTask(task)}
                     onToday={() => toggleToday(task)}
                     onEdit={() => edit(task)}
                     onRemove={() => remove(task.id!)}
@@ -384,7 +401,7 @@ export default function Tasks({ todayMode = false }: { todayMode?: boolean }) {
 
       {!todayMode && !loading && labels.length > 0 && (
         <Card className="mt-4 px-4 py-3">
-          <div className="mb-2 text-xs font-medium text-muted-foreground">标签字典</div>
+          <div className="mb-2 text-xs font-medium text-muted-foreground">{t('task.labelDictionary')}</div>
           <div className="flex flex-wrap gap-1.5">
             {labels.map(label => (
               <button
@@ -404,57 +421,57 @@ export default function Tasks({ todayMode = false }: { todayMode?: boolean }) {
       {/* 新建 / 编辑 */}
       <Dialog
         open={showForm}
-        onClose={() => { setShowForm(false); setForm(emptyForm()) }}
-        title={form.id ? '编辑任务' : '新建任务'}
-        description="工时是两个手填的数字，收工后回来补实际用时就行。"
+        onClose={() => { setShowForm(false); setForm(emptyForm()); setFormError('') }}
+        title={form.id ? t('task.editTitle') : t('task.new')}
+        description={t('task.formDescription')}
         footer={
           <>
-            <Button variant="outline" onClick={() => { setShowForm(false); setForm(emptyForm()) }}>
-              取消
+            <Button variant="outline" onClick={() => { setShowForm(false); setForm(emptyForm()); setFormError('') }}>
+              {t('common.cancel')}
             </Button>
-            <Button type="submit" form="task-form">保存</Button>
+            <Button type="submit" form="task-form">{t('common.save')}</Button>
           </>
         }
       >
         <form id="task-form" onSubmit={submit} className="space-y-3.5">
           <div>
-            <FieldLabel>标题 *</FieldLabel>
+            <FieldLabel>{t('task.field.title')}</FieldLabel>
             <Input
               value={form.title}
               onChange={e => setForm({ ...form, title: e.target.value })}
-              placeholder="一句话说清要做什么"
+              placeholder={t('task.field.titlePlaceholder')}
               required
             />
           </div>
 
           <div className="grid gap-3 sm:grid-cols-3">
             <div>
-              <FieldLabel>类型</FieldLabel>
+              <FieldLabel>{t('task.field.category')}</FieldLabel>
               <Select
                 value={form.category}
                 onChange={e => setForm({ ...form, category: e.target.value as TaskCategory })}
               >
-                {Object.entries(CATEGORY_LABEL).map(([value, label]) => (
-                  <option key={value} value={value}>{label}</option>
+                {CATEGORY_ORDER.map(value => (
+                  <option key={value} value={value}>{t(CATEGORY_KEYS[value])}</option>
                 ))}
               </Select>
             </div>
             <div>
-              <FieldLabel>状态</FieldLabel>
+              <FieldLabel>{t('task.field.status')}</FieldLabel>
               <Select value={form.status} onChange={e => setForm({ ...form, status: e.target.value as TaskStatus })}>
                 {STATUS_ORDER.map(value => (
-                  <option key={value} value={value}>{STATUS_LABEL[value]}</option>
+                  <option key={value} value={value}>{t(STATUS_KEYS[value])}</option>
                 ))}
               </Select>
             </div>
             <div>
-              <FieldLabel>优先级</FieldLabel>
+              <FieldLabel>{t('task.field.priority')}</FieldLabel>
               <Select
                 value={form.priority}
                 onChange={e => setForm({ ...form, priority: e.target.value as TaskPriority })}
               >
-                {Object.entries(PRIORITY_LABEL).map(([value, label]) => (
-                  <option key={value} value={value}>{label}</option>
+                {PRIORITY_ORDER.map(value => (
+                  <option key={value} value={value}>{t(PRIORITY_KEYS[value])}</option>
                 ))}
               </Select>
             </div>
@@ -462,19 +479,19 @@ export default function Tasks({ todayMode = false }: { todayMode?: boolean }) {
 
           <div className="grid gap-3 sm:grid-cols-3">
             <div>
-              <FieldLabel>项目</FieldLabel>
+              <FieldLabel>{t('task.field.project')}</FieldLabel>
               <Select
                 value={form.project_id ?? ''}
                 onChange={e => setForm({ ...form, project_id: e.target.value ? Number(e.target.value) : undefined })}
               >
-                <option value="">不关联</option>
+                <option value="">{t('task.field.projectNone')}</option>
                 {projects.map(p => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </Select>
             </div>
             <div>
-              <FieldLabel>计划日期</FieldLabel>
+              <FieldLabel>{t('task.field.scheduled')}</FieldLabel>
               <Input
                 type="date"
                 value={form.scheduled_date || ''}
@@ -482,7 +499,7 @@ export default function Tasks({ todayMode = false }: { todayMode?: boolean }) {
               />
             </div>
             <div>
-              <FieldLabel>截止日期</FieldLabel>
+              <FieldLabel>{t('task.field.due')}</FieldLabel>
               <Input
                 type="date"
                 value={form.due_date || ''}
@@ -493,23 +510,23 @@ export default function Tasks({ todayMode = false }: { todayMode?: boolean }) {
 
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
-              <FieldLabel>工作量评估（小时）</FieldLabel>
+              <FieldLabel>{t('task.field.estimate')}</FieldLabel>
               <Input
                 type="number"
                 min="0"
                 step="0.5"
-                placeholder="例如 4"
+                placeholder={t('task.field.estimatePlaceholder')}
                 value={form.estimated_hours || ''}
                 onChange={e => setForm({ ...form, estimated_hours: parseHours(e.target.value) })}
               />
             </div>
             <div>
-              <FieldLabel>实际用时（小时）</FieldLabel>
+              <FieldLabel>{t('task.field.actual')}</FieldLabel>
               <Input
                 type="number"
                 min="0"
                 step="0.5"
-                placeholder="收工后填"
+                placeholder={t('task.field.actualPlaceholder')}
                 value={form.actual_hours || ''}
                 onChange={e => setForm({ ...form, actual_hours: parseHours(e.target.value) })}
               />
@@ -517,17 +534,22 @@ export default function Tasks({ todayMode = false }: { todayMode?: boolean }) {
           </div>
 
           <div>
-            <FieldLabel>标签（逗号分隔）</FieldLabel>
-            <Input value={labelInput} onChange={e => setLabelInput(e.target.value)} placeholder="客户A, 紧急" />
+            <FieldLabel>{t('task.field.labels')}</FieldLabel>
+            <Input
+              value={labelInput}
+              onChange={e => setLabelInput(e.target.value)}
+              placeholder={t('task.field.labelsPlaceholder')}
+            />
           </div>
 
+          {/* 内容用富文本：能贴图、能挂附件，写长一点的背景说明才不至于是一坨纯文本 */}
           <div>
-            <FieldLabel>内容</FieldLabel>
-            <Textarea
-              rows={5}
+            <FieldLabel>{t('task.field.content')}</FieldLabel>
+            <RichTextEditor
               value={form.content || ''}
-              onChange={e => setForm({ ...form, content: e.target.value })}
-              placeholder="背景、验收标准、相关链接…"
+              onChange={next => setForm({ ...form, content: next })}
+              placeholder={t('task.field.contentPlaceholder')}
+              minRows={5}
             />
           </div>
 
@@ -538,13 +560,14 @@ export default function Tasks({ todayMode = false }: { todayMode?: boolean }) {
               checked={!!form.is_today}
               onChange={e => setForm({ ...form, is_today: e.target.checked })}
             />
-            加入今日
+            {t('task.field.addToday')}
           </label>
+          {formError && <div className="text-[11.5px] text-red-600">{formError}</div>}
         </form>
       </Dialog>
 
       {/* 详情（仪表盘共用同一份组件） */}
-      <TaskDetail task={detail} onClose={() => setDetail(null)} />
+      <TaskDetail task={detail} onClose={() => setDetail(null)} onComplete={completeTask} />
     </div>
   )
 }

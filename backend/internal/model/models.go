@@ -100,17 +100,21 @@ type ReceivableSummary struct {
 }
 
 // Finance 财务
+//
+// ReceivableID 指向「标记已收」时自动生成这笔流水的收款计划；
+// 手记的收支为空，撤回 / 删除收款计划时就只删自动记的那条，不误伤手记的账。
 type Finance struct {
-	ID          int       `gorm:"primaryKey" json:"id"`
-	UserID      int       `gorm:"index;not null" json:"-"`
-	Type        string    `gorm:"size:20;not null" json:"type"` // income/expense
-	Amount      Amount    `gorm:"type:numeric(18,2);not null;default:0" json:"amount"`
-	Category    string    `gorm:"size:100" json:"category"`
-	Description string    `gorm:"type:text" json:"description"`
-	Date        string    `gorm:"size:10;not null;index" json:"date"` // YYYY-MM-DD
-	ProjectID   *int      `gorm:"index" json:"project_id,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID           int       `gorm:"primaryKey" json:"id"`
+	UserID       int       `gorm:"index;not null" json:"-"`
+	Type         string    `gorm:"size:20;not null" json:"type"` // income/expense
+	Amount       Amount    `gorm:"type:numeric(18,2);not null;default:0" json:"amount"`
+	Category     string    `gorm:"size:100" json:"category"`
+	Description  string    `gorm:"type:text" json:"description"`
+	Date         string    `gorm:"size:10;not null;index" json:"date"` // YYYY-MM-DD
+	ProjectID    *int      `gorm:"index" json:"project_id,omitempty"`
+	ReceivableID *int      `gorm:"index" json:"receivable_id,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 // Idea 灵感。想到什么随手丢一条，正文本身是唯一的必填项。
@@ -180,16 +184,19 @@ type Comment struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
-// Attachment 图片附件（评论/任务内容里粘贴的截图）
+// Attachment 附件（评论/任务内容里粘贴的截图，或富文本里挂的文件）
+//
+// 只属于上传它的人：文件落在 uploads/<user_id>/ 下，读取走 GET /api/attachments/:id，
+// 仓储层按 user_id 过滤，别人拿到 id 也是 404。URL 是鉴权接口，不是公开地址。
 type Attachment struct {
 	ID           int       `gorm:"primaryKey" json:"id"`
 	UserID       int       `gorm:"index;not null" json:"-"`
-	Filename     string    `gorm:"size:200;not null" json:"filename"`
+	Filename     string    `gorm:"size:200;not null" json:"filename"` // 落盘名（随机串）
 	OriginalName string    `gorm:"size:300" json:"original_name,omitempty"`
 	MimeType     string    `gorm:"size:100;not null" json:"mime_type"`
 	Size         int64     `gorm:"not null" json:"size"`
-	Path         string    `gorm:"size:500;not null" json:"path"`
-	URL          string    `gorm:"-" json:"url"`
+	Path         string    `gorm:"size:500;not null" json:"path"` // 相对 uploads 的路径
+	URL          string    `gorm:"-" json:"url"`                  // 只读：/api/attachments/:id
 	CreatedAt    time.Time `json:"created_at"`
 }
 

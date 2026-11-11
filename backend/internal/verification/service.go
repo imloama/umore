@@ -23,19 +23,20 @@ import (
 	"github.com/imloama/umore/internal/repository"
 )
 
+// 错误文本只用英文：提示语由前端按 handler 回的错误码渲染，后端不做多语。
 var (
 	// ErrNotConfigured 这台机器没配发信参数
-	ErrNotConfigured = errors.New("邮件服务未配置，无法发送验证码")
+	ErrNotConfigured = errors.New("mail service not configured")
 	// ErrTooFrequent 距上次发码太近
-	ErrTooFrequent = errors.New("验证码发送太频繁，请稍后再试")
+	ErrTooFrequent = errors.New("verification code requested too frequently")
 	// ErrNoCode 没发过码，或那条码已经被用掉
-	ErrNoCode = errors.New("请先获取验证码")
+	ErrNoCode = errors.New("verification code not found, request a new one")
 	// ErrExpired 码过期了
-	ErrExpired = errors.New("验证码已过期，请重新获取")
+	ErrExpired = errors.New("verification code expired")
 	// ErrTooManyAttempts 试错次数超上限，这条码作废
-	ErrTooManyAttempts = errors.New("验证码错误次数过多，请重新获取")
+	ErrTooManyAttempts = errors.New("too many attempts, request a new code")
 	// ErrMismatch 码不对
-	ErrMismatch = errors.New("验证码不正确")
+	ErrMismatch = errors.New("verification code is incorrect")
 )
 
 // PurposeRegister 目前只有注册用验证码，找回密码之类以后加在这里
@@ -162,7 +163,7 @@ func (s *Service) SendRegisterCode(ctx context.Context, email string) error {
 		// 信没发出去，把刚写的码删掉，让用户能立刻重发
 		_ = s.Cache.Del(ctx, codeKey)
 		_ = s.Cache.Del(ctx, coolKey)
-		return fmt.Errorf("发送验证邮件失败: %w", err)
+		return fmt.Errorf("failed to send verification email: %w", err)
 	}
 	return nil
 }

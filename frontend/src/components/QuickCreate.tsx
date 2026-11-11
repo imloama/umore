@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { ArrowUpRight, FolderPlus, Lightbulb, ListTodo, Plus, Sparkles } from 'lucide-react'
 import { ideaApi, projectApi, taskApi } from '../services/api'
 import type { TaskCategory } from '../types'
+import { useI18n, type MessageKey } from '@/i18n'
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
@@ -16,32 +17,32 @@ type Kind =
   | { type: 'task'; category: TaskCategory }
   | { type: 'project' }
 
-const OPTIONS: { key: string; icon: typeof Plus; title: string; hint: string; kind: Kind }[] = [
-  { key: 'idea', icon: Lightbulb, title: '灵感', hint: '先记下来，之后归档或变项目', kind: { type: 'idea' } },
-  { key: 'todo', icon: ListTodo, title: '待办', hint: '今天要做的一件事', kind: { type: 'task', category: 'todo' } },
-  { key: 'issue', icon: ListTodo, title: '问题', hint: '哪里坏了、哪里不对', kind: { type: 'task', category: 'issue' } },
+const OPTIONS: { key: string; icon: typeof Plus; titleKey: MessageKey; hintKey: MessageKey; kind: Kind }[] = [
+  { key: 'idea', icon: Lightbulb, titleKey: 'quick.idea', hintKey: 'quick.ideaHint', kind: { type: 'idea' } },
+  { key: 'todo', icon: ListTodo, titleKey: 'quick.todo', hintKey: 'quick.todoHint', kind: { type: 'task', category: 'todo' } },
+  { key: 'issue', icon: ListTodo, titleKey: 'quick.issue', hintKey: 'quick.issueHint', kind: { type: 'task', category: 'issue' } },
   {
     key: 'requirement',
     icon: Sparkles,
-    title: '需求',
-    hint: '要加的东西、要改的行为',
+    titleKey: 'quick.requirement',
+    hintKey: 'quick.requirementHint',
     kind: { type: 'task', category: 'requirement' }
   },
   {
     key: 'opportunity',
     icon: ArrowUpRight,
-    title: '商机',
-    hint: '可能有戏的活，赢单后转项目',
+    titleKey: 'quick.opportunity',
+    hintKey: 'quick.opportunityHint',
     kind: { type: 'task', category: 'opportunity' }
   },
-  { key: 'project', icon: FolderPlus, title: '项目', hint: '直接开工，客户金额之后补', kind: { type: 'project' } }
+  { key: 'project', icon: FolderPlus, titleKey: 'quick.project', hintKey: 'quick.projectHint', kind: { type: 'project' } }
 ]
 
-const KIND_LABEL: Record<TaskCategory, string> = {
-  todo: '待办',
-  issue: '问题',
-  requirement: '需求',
-  opportunity: '商机'
+const KIND_KEY: Record<TaskCategory, MessageKey> = {
+  todo: 'quick.todo',
+  issue: 'quick.issue',
+  requirement: 'quick.requirement',
+  opportunity: 'quick.opportunity'
 }
 
 const sameKind = (a: Kind, b: Kind) =>
@@ -53,6 +54,7 @@ const sameKind = (a: Kind, b: Kind) =>
  */
 export default function QuickCreate() {
   const navigate = useNavigate()
+  const { t } = useI18n()
   const [open, setOpen] = useState(false)
   const [kind, setKind] = useState<Kind>({ type: 'idea' })
   const [text, setText] = useState('')
@@ -100,39 +102,39 @@ export default function QuickCreate() {
       setTimeout(() => inputRef.current?.focus(), 0)
     } catch (err) {
       console.error('quick create failed:', err)
-      setError('没存上，再试一次')
+      setError(t('quick.createFailed'))
       setSaving(false)
     }
   }
 
-  const activeLabel = kind.type === 'idea' ? '灵感' : kind.type === 'project' ? '项目' : KIND_LABEL[kind.category]
+  const activeLabel = kind.type === 'idea' ? t('quick.idea') : kind.type === 'project' ? t('quick.project') : t(KIND_KEY[kind.category])
   const placeholder =
     kind.type === 'idea'
-      ? '想到什么就写什么，一句话也行…'
+      ? t('quick.placeholderIdea')
       : kind.type === 'project'
-        ? '项目叫什么？'
-        : `这条${activeLabel}要做什么？`
+        ? t('quick.placeholderProject')
+        : t('quick.placeholderTask', { kind: activeLabel })
 
   return (
     <>
-      <Button size="sm" onClick={() => setOpen(true)} title="快捷新建">
+      <Button size="sm" onClick={() => setOpen(true)} title={t('nav.quickCreate')}>
         <Plus />
-        <span className="hidden sm:inline">新建</span>
+        <span className="hidden sm:inline">{t('quick.new')}</span>
       </Button>
 
       <Dialog
         open={open}
         onClose={close}
-        title="记一笔"
-        description="⌘ / Ctrl + Enter 保存，存完可以直接接着记下一条。"
+        title={t('quick.title')}
+        description={t('quick.description')}
         className="max-w-xl"
         footer={
           <>
             <Button variant="ghost" onClick={() => { close(); navigate('/ideas') }}>
-              去灵感墙
+              {t('quick.goIdeas')}
             </Button>
             <Button onClick={submit} disabled={saving || !text.trim()}>
-              {saving ? '保存中…' : `存为${activeLabel}`}
+              {saving ? t('common.saving') : t('quick.saveAs', { kind: activeLabel })}
             </Button>
           </>
         }
@@ -153,8 +155,8 @@ export default function QuickCreate() {
               >
                 <Icon className={cn('mt-0.5 size-4 shrink-0', active ? 'text-primary' : 'text-muted-foreground')} />
                 <span className="min-w-0">
-                  <span className="block text-[13px] font-medium leading-tight">{option.title}</span>
-                  <span className="mt-0.5 block text-[10.5px] leading-snug text-muted-foreground">{option.hint}</span>
+                  <span className="block text-[13px] font-medium leading-tight">{t(option.titleKey)}</span>
+                  <span className="mt-0.5 block text-[10.5px] leading-snug text-muted-foreground">{t(option.hintKey)}</span>
                 </span>
               </button>
             )
@@ -162,7 +164,7 @@ export default function QuickCreate() {
         </div>
 
         <div className="mt-3.5">
-          <Label>{activeLabel}内容 *</Label>
+          <Label>{t('quick.contentLabel', { kind: activeLabel })}</Label>
           <Textarea
             ref={inputRef}
             rows={kind.type === 'project' ? 2 : 4}
@@ -178,10 +180,10 @@ export default function QuickCreate() {
           />
           <p className="mt-1.5 text-[11px] text-muted-foreground">
             {kind.type === 'idea'
-              ? '只存正文，标题和标签都不要。'
+              ? t('quick.hintIdea')
               : kind.type === 'project'
-                ? '名称先占个位，客户、金额、仓库去项目页补。'
-                : '这一句就是标题，细节去任务页补。'}
+                ? t('quick.hintProject')
+                : t('quick.hintTask')}
           </p>
           {error && <p className="mt-1.5 text-[11.5px] text-red-600">{error}</p>}
         </div>

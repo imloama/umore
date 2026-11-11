@@ -12,8 +12,11 @@ import Receivables from './pages/Receivables'
 import Profile from './pages/Profile'
 import Ideas from './pages/Ideas'
 import { authApi, authToken, clearSession, currentUser, isStaticPreview, storeSession } from './services/api'
+import { useI18n } from './i18n'
 
 function App() {
+  // 加载态文案也要跟着语言走
+  const { t } = useI18n()
   // null = 还在查；true/false = 库里有没有账号（决定默认停在登录还是注册）
   const [hasUsers, setHasUsers] = useState<boolean | null>(null)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
@@ -57,7 +60,7 @@ function App() {
     return (
       <div className="flex min-h-screen items-center justify-center gap-2 text-xs text-muted-foreground">
         <span className="size-3 animate-spin rounded-full border-2 border-border border-t-primary" />
-        加载中…
+        {t('common.loading')}
       </div>
     )
   }

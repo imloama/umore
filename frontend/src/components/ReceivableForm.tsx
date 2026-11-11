@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { Project, Receivable } from '../types'
-import { receivableApi } from '../services/api'
+import { errorCodeOf, receivableApi } from '../services/api'
+import { useI18n } from '@/i18n'
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -30,6 +31,7 @@ export default function ReceivableForm({
   onClose: () => void
   onSaved: (saved: Receivable) => void
 }) {
+  const { t, te } = useI18n()
   const [form, setForm] = useState<Partial<Receivable>>(emptyReceivable(defaultProjectId))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -44,7 +46,7 @@ export default function ReceivableForm({
     e.preventDefault()
     const amount = Number(form.amount)
     if (!Number.isFinite(amount) || amount < 0) {
-      setError('金额要填个非负数字')
+      setError(t('receivable.form.amountInvalid'))
       return
     }
     setSaving(true)
@@ -52,7 +54,8 @@ export default function ReceivableForm({
     try {
       const payload: Partial<Receivable> = {
         project_id: form.project_id ?? undefined,
-        title: (form.title || '').trim() || '待收款',
+        // 标题留空就用默认名，默认名也跟着界面语言走
+        title: (form.title || '').trim() || t('receivable.form.defaultTitle'),
         amount,
         due_date: form.due_date || '',
         note: (form.note || '').trim(),
@@ -65,7 +68,8 @@ export default function ReceivableForm({
       onClose()
     } catch (err) {
       console.error('Failed to save receivable:', err)
-      setError('保存失败，看看后端还在不在')
+      const { code } = errorCodeOf(err)
+      setError(code ? te(code) : t('receivable.form.saveFailed'))
     } finally {
       setSaving(false)
     }
@@ -76,30 +80,30 @@ export default function ReceivableForm({
       open={open}
       onClose={onClose}
       className="max-w-lg"
-      title={form.id ? '改这一笔' : '记一笔待收'}
-      description="只是记一下：多少钱、什么时候该收、备注。到期我来提醒你。"
+      title={form.id ? t('receivable.form.editTitle') : t('receivable.form.title')}
+      description={t('receivable.form.description')}
       footer={
         <>
-          <Button variant="outline" onClick={onClose}>取消</Button>
+          <Button variant="outline" onClick={onClose}>{t('common.cancel')}</Button>
           <Button type="submit" form="receivable-form" disabled={saving}>
-            {saving ? '保存中…' : '保存'}
+            {saving ? t('common.saving') : t('common.save')}
           </Button>
         </>
       }
     >
       <form id="receivable-form" onSubmit={submit} className="space-y-3.5">
         <div>
-          <Label>收什么钱</Label>
+          <Label>{t('receivable.form.what')}</Label>
           <Input
             value={form.title || ''}
             onChange={e => setForm({ ...form, title: e.target.value })}
-            placeholder="首付款 / 二期款 / 尾款"
+            placeholder={t('receivable.form.whatPlaceholder')}
             autoFocus
           />
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
-            <Label>金额（元）*</Label>
+            <Label>{t('receivable.form.amount')}</Label>
             <Input
               type="number"
               step="0.01"
@@ -109,7 +113,7 @@ export default function ReceivableForm({
             />
           </div>
           <div>
-            <Label>到期时间</Label>
+            <Label>{t('receivable.form.due')}</Label>
             <Input
               type="date"
               value={form.due_date || ''}
@@ -119,12 +123,12 @@ export default function ReceivableForm({
         </div>
         {!lockProject && projects && (
           <div>
-            <Label>关联项目</Label>
+            <Label>{t('receivable.form.project')}</Label>
             <Select
               value={form.project_id ? String(form.project_id) : ''}
               onChange={e => setForm({ ...form, project_id: e.target.value ? Number(e.target.value) : undefined })}
             >
-              <option value="">不关联（私人垫款也行）</option>
+              <option value="">{t('receivable.form.projectNone')}</option>
               {projects.map(p => (
                 <option key={p.id} value={p.id}>
                   {p.name}
@@ -134,12 +138,12 @@ export default function ReceivableForm({
           </div>
         )}
         <div>
-          <Label>备注</Label>
+          <Label>{t('receivable.form.note')}</Label>
           <Textarea
             rows={3}
             value={form.note || ''}
             onChange={e => setForm({ ...form, note: e.target.value })}
-            placeholder="客户说月底前给 / 要先开发票"
+            placeholder={t('receivable.form.notePlaceholder')}
           />
         </div>
         {error && <div className="text-[11px] text-red-600">{error}</div>}

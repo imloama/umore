@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, CalendarClock, CheckCircle2, Plus, Wallet } from 'lucide-react'
 import { projectApi, receivableApi } from '../services/api'
 import type { Project, Receivable, ReceivableSummary } from '../types'
+import { useI18n } from '@/i18n'
 import PageHeader from '../components/PageHeader'
 import ProjectDetail from '../components/ProjectDetail'
 import ReceivableForm from '../components/ReceivableForm'
@@ -29,6 +30,7 @@ const EMPTY_SUMMARY: ReceivableSummary = {
  * 想看某笔挂在哪个单上，点项目名进项目详情（下一级）。
  */
 export default function Receivables() {
+  const { t } = useI18n()
   const [items, setItems] = useState<Receivable[]>([])
   const [projects, setProjects] = useState<Project[]>([])
   const [summary, setSummary] = useState<ReceivableSummary>(EMPTY_SUMMARY)
@@ -71,7 +73,7 @@ export default function Receivables() {
       const key = item.project_id ?? 0
       const row = map.get(key) || {
         project: projects.find(p => p.id === item.project_id),
-        name: item.project_name || '未关联项目',
+        name: item.project_name || t('dashboard.unlinkedProject'),
         amount: 0,
         count: 0,
         overdue: 0
@@ -85,7 +87,7 @@ export default function Receivables() {
     return [...map.entries()]
       .map(([id, row]) => ({ id, ...row, amount: Math.round(row.amount * 100) / 100 }))
       .sort((a, b) => b.amount - a.amount)
-  }, [pending, projects])
+  }, [pending, projects, t])
 
   const toggleDone = async (item: Receivable) => {
     if (!item.id) return
@@ -99,7 +101,7 @@ export default function Receivables() {
 
   const remove = async (item: Receivable) => {
     if (!item.id) return
-    if (!confirm(`删掉「${item.title}」这笔待收？`)) return
+    if (!confirm(t('receivable.confirmDelete', { title: item.title }))) return
     await receivableApi.remove(item.id)
     load()
   }
@@ -132,8 +134,8 @@ export default function Receivables() {
     <div>
       <PageHeader
         eyebrow="RECEIVABLES"
-        title="回款"
-        description="该收的钱记一笔就够：金额、到期时间、备注。到期了在这儿标红提醒你。"
+        title={t('receivable.title')}
+        description={t('receivable.description')}
         actions={
           <Button
             onClick={() => {
@@ -142,7 +144,7 @@ export default function Receivables() {
             }}
           >
             <Plus />
-            记一笔待收
+            {t('receivable.new')}
           </Button>
         }
       />
@@ -151,11 +153,11 @@ export default function Receivables() {
         <button type="button" onClick={() => setTab('pending')} className="text-left">
           <Card className={cn('px-4 py-3.5 transition-colors hover:border-primary/40', tab === 'pending' && 'border-primary/40')}>
             <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-              <span>未收款</span>
+              <span>{t('receivable.pending')}</span>
               <Wallet className="size-4 text-amber-500" />
             </div>
             <div className="tabular mt-1.5 text-2xl font-semibold text-amber-700">{money(summary.pending_amount)}</div>
-            <div className="mt-0.5 text-[11px] text-muted-foreground">{summary.pending_count} 笔还没收</div>
+            <div className="mt-0.5 text-[11px] text-muted-foreground">{t('receivable.pendingCount', { n: summary.pending_count })}</div>
           </Card>
         </button>
 
@@ -168,14 +170,16 @@ export default function Receivables() {
             )}
           >
             <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-              <span>已逾期</span>
+              <span>{t('receivable.overdue')}</span>
               <AlertTriangle className={cn('size-4', summary.overdue_count > 0 ? 'text-red-500' : 'text-muted-foreground')} />
             </div>
             <div className={cn('tabular mt-1.5 text-2xl font-semibold', summary.overdue_count > 0 ? 'text-red-600' : '')}>
               {money(summary.overdue_amount)}
             </div>
             <div className="mt-0.5 text-[11px] text-muted-foreground">
-              {summary.overdue_count > 0 ? `${summary.overdue_count} 笔该催了` : '没有逾期的，稳'}
+              {summary.overdue_count > 0
+                ? t('receivable.overdueCount', { n: summary.overdue_count })
+                : t('receivable.noOverdue')}
             </div>
           </Card>
         </button>
@@ -183,11 +187,11 @@ export default function Receivables() {
         <button type="button" onClick={() => setTab('soon')} className="text-left">
           <Card className={cn('px-4 py-3.5 transition-colors hover:border-amber-300', tab === 'soon' && 'border-amber-300')}>
             <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-              <span>7 天内到期</span>
+              <span>{t('receivable.dueSoon')}</span>
               <CalendarClock className="size-4 text-primary" />
             </div>
             <div className="tabular mt-1.5 text-2xl font-semibold">{money(summary.due_soon_amount)}</div>
-            <div className="mt-0.5 text-[11px] text-muted-foreground">{summary.due_soon_count} 笔快到了</div>
+            <div className="mt-0.5 text-[11px] text-muted-foreground">{t('receivable.dueSoonCount', { n: summary.due_soon_count })}</div>
           </Card>
         </button>
       </div>
@@ -195,11 +199,11 @@ export default function Receivables() {
       <Card className="mb-4 px-4 py-3">
         <Tabs value={tab} onValueChange={setTab}>
           <TabsList>
-            <TabsTrigger value="pending">未收 ({pending.length})</TabsTrigger>
-            <TabsTrigger value="overdue">逾期 ({overdue.length})</TabsTrigger>
-            <TabsTrigger value="soon">7 天内 ({dueSoon.length})</TabsTrigger>
-            <TabsTrigger value="done">已收 ({done.length})</TabsTrigger>
-            <TabsTrigger value="projects">按项目</TabsTrigger>
+            <TabsTrigger value="pending">{t('receivable.tab.pending', { n: pending.length })}</TabsTrigger>
+            <TabsTrigger value="overdue">{t('receivable.tab.overdue', { n: overdue.length })}</TabsTrigger>
+            <TabsTrigger value="soon">{t('receivable.tab.soon', { n: dueSoon.length })}</TabsTrigger>
+            <TabsTrigger value="done">{t('receivable.tab.done', { n: done.length })}</TabsTrigger>
+            <TabsTrigger value="projects">{t('receivable.tab.byProject')}</TabsTrigger>
           </TabsList>
 
           <TabsContent value="pending">
@@ -217,7 +221,7 @@ export default function Receivables() {
           <TabsContent value="projects">
             {byProject.length === 0 ? (
               <div className="rounded-lg border border-dashed border-border px-4 py-10 text-center text-xs text-muted-foreground">
-                没有待收的钱。
+                {t('receivable.emptyByProject')}
               </div>
             ) : (
               <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border">
@@ -234,18 +238,25 @@ export default function Receivables() {
                         {row.name}
                       </div>
                       <div className="mt-0.5 text-[11px] text-muted-foreground">
-                        {row.count} 笔
-                        {row.overdue > 0 && <span className="ml-1 text-red-600">· 逾期 {money(row.overdue)}</span>}
-                        {row.next && <span className="ml-1">· 最近到期 {row.next}</span>}
+                        {t('receivable.count', { n: row.count })}
+                        {row.overdue > 0 && (
+                          <span className="ml-1 text-red-600">{t('receivable.overdueInline', { amount: money(row.overdue) })}</span>
+                        )}
+                        {row.next && <span className="ml-1">{t('receivable.nextDue', { date: row.next })}</span>}
                         {row.project && (
-                          <span className="ml-1">· 合同 {money(row.project.amount)} / 已收 {money(row.project.received)}</span>
+                          <span className="ml-1">
+                            {t('receivable.contractLine', {
+                              amount: money(row.project.amount),
+                              received: money(row.project.received)
+                            })}
+                          </span>
                         )}
                       </div>
                     </button>
                     <span className="tabular shrink-0 text-[13px] font-semibold text-amber-700">{money(row.amount)}</span>
                     {row.project && (
                       <Button variant="outline" size="xs" className="shrink-0" onClick={() => openProject(row.id)}>
-                        进入项目
+                        {t('receivable.enterProject')}
                       </Button>
                     )}
                   </li>
@@ -257,9 +268,7 @@ export default function Receivables() {
       </Card>
 
       {items.length === 0 && (
-        <p className="text-center text-[11px] text-muted-foreground">
-          记完一笔，明天早上它就会出现在「逾期」里催你——这就是 v1 的全部复杂程度。
-        </p>
+        <p className="text-center text-[11px] text-muted-foreground">{t('receivable.footer')}</p>
       )}
 
       <ReceivableForm

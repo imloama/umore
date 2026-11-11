@@ -217,13 +217,72 @@ export const ideaApi = {
   remove: (id: number) => api.delete(`/ideas/${id}`)
 }
 
+/**
+ * 附件上传。
+ * 后端按用户隔离落盘，读取走 GET /api/attachments/<id>（同一个 axios 实例，
+ * 带上 Authorization 头才拿得到），所以 url 不是公开地址，别人拿不走。
+ */
+export interface UploadedAttachment {
+  id: number
+  url: string
+  original_name?: string
+  mime_type: string
+  size: number
+}
+
+const postFile = (file: File) => {
+  const form = new FormData()
+  form.append('file', file)
+  return api.post<any, UploadedAttachment>('/attachments', form)
+}
+
 export const uploadApi = {
-  // 粘贴截图走这里：后端只认 png/jpeg/gif/webp，返回 { url }
-  image: (file: File) => {
-    const form = new FormData()
-    form.append('file', file)
-    return api.post<any, { url: string; id: number; size: number }>('/attachments', form)
-  }
+  /** 粘贴截图走这里 */
+  image: (file: File) => postFile(file),
+  /** 富文本里的文件附件（pdf / txt / office / zip…） */
+  file: (file: File) => postFile(file)
+}
+
+/**
+ * 富文本里的图片怎么显示。
+ *
+ * 附件接口要 Authorization 头，而 <img src> 带不了头 —— 浏览器会直接 401。
+ * 所以这里用同一个 axios 实例把图拉成 blob，再换成 objectURL 给 <img>：
+ * 图片和文本一样受鉴权保护，不会因为渲染而变成公开资源。
+ * 同一个 URL 只拉一次，多个组件共用结果。
+ */
+const imageCache = new Map<string, string>()
+
+export const attachmentImageUrl = (url: string) => imageCache.get(url) ?? ''
+
+// 同一张图可能同时被列表里的多个组件要，只发一次请求
+const pending = new Map<string, Promise<string>>()
+
+export const loadAttachmentImage = (url: string) => {
+  const hit = imageCache.get(url)
+  if (hit) return Promise.resolve(hit)
+  const inflight = pending.get(url)
+  if (inflight) return inflight
+
+  // baseURL 已经是 /api，所以 /api/attachments/12 传给 axios 时要把前缀摘掉；
+  // 老地址 /uploads/... 不在 /api 下，原样发
+  const path = url.startsWith('/api/') ? url.slice(4) : url
+  const task = api
+    .get<any, Blob>(path, { responseType: 'blob' })
+    .then(res => {
+      const objectUrl = URL.createObjectURL(res)
+      imageCache.set(url, objectUrl)
+      return objectUrl
+    })
+    .finally(() => pending.delete(url))
+  pending.set(url, task)
+  return task
+}
+
+/** 后端错误对象 → 错误码，配合 i18n 的 te() 出本地文案 */
+export const errorCodeOf = (err: unknown) => {
+  const e = err as { response?: { data?: { code?: string; error?: string } } }
+  return { code: e?.response?.data?.code, message: e?.response?.data?.error }
 }
 
 export const projectApi = {

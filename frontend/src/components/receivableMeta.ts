@@ -3,6 +3,7 @@ import type { Receivable } from '../types'
 /**
  * 金额展示：只保留有效小数位。
  * 整数不写 .00（合同 50000 看着就是 5 万），角分不清零；浮点尾巴一律截到分。
+ * 货币符号不随语言变，人民币就是 ¥。
  */
 export const money = (n?: number) => {
   const v = Math.round((n || 0) * 100) / 100
@@ -18,18 +19,7 @@ export const sumMoney = (list: { amount?: number }[]) =>
 
 export const sumAmounts = (amounts: number[]) => sumMoney(amounts.map(amount => ({ amount })))
 
-/** 到期描述：逾期的说人话，别让人自己算 */
-export const dueText = (item: Receivable) => {
-  if (!item.due_date) return '未设到期时间'
-  if (item.status === 'done') return item.due_date
-  const left = item.days_left ?? 0
-  if (item.overdue) return `逾期 ${Math.abs(left)} 天`
-  if (left === 0) return '今天到期'
-  if (left === 1) return '明天到期'
-  return `还有 ${left} 天`
-}
-
-/** 到期配色：逾期红、7 天内橙、其余灰 */
+/** 到期配色：逾期红、7 天内橙、其余灰（文案在 i18n 里，这里只管颜色） */
 export const dueTone = (item: Receivable) => {
   if (item.status === 'done') return 'text-muted-foreground'
   if (item.overdue) return 'text-red-600'

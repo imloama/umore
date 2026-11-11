@@ -1,4 +1,5 @@
 import { cn } from '@/lib/utils'
+import { useI18n } from '@/i18n'
 import { formatHours } from './taskMeta'
 
 /**
@@ -31,19 +32,22 @@ export default function HoursDelta({
   estimated: number
   compact?: boolean
 }) {
+  const { t } = useI18n()
   const { delta, ratio, hasBoth, level } = hoursDeviation(actual, estimated)
 
   if (!hasBoth) {
     return (
       <span className="text-[11px] text-muted-foreground">
-        实际 {formatHours(actual) || '0h'} / 评估 {formatHours(estimated) || '未填'}
+        {t('hours.actual', { hours: formatHours(actual) || '0h' })} /{' '}
+        {t('hours.estimate', { hours: formatHours(estimated) || t('hours.notSet') })}
       </span>
     )
   }
 
   const over = delta > 0
   const percent = Math.round(Math.abs(ratio - 1) * 100)
-  const label = over ? `超 ${formatHours(Math.abs(delta))}` : `省 ${formatHours(Math.abs(delta))}`
+  const hours = formatHours(Math.abs(delta))
+  const label = over ? t('hours.over', { hours }) : t('hours.saved', { hours })
 
   return (
     <span
@@ -53,7 +57,11 @@ export default function HoursDelta({
         level === 'over' && 'bg-amber-50 text-amber-700',
         level === 'ok' && 'bg-emerald-50 text-emerald-700'
       )}
-      title={`评估 ${formatHours(estimated)}，实际 ${formatHours(actual)}，偏差 ${over ? '+' : '-'}${percent}%`}
+      title={t('hours.deviationTitle', {
+        estimate: formatHours(estimated),
+        actual: formatHours(actual),
+        delta: `${over ? '+' : '-'}${percent}%`
+      })}
     >
       {label}
       {!compact && <span className="opacity-70">({over ? '+' : '-'}{percent}%)</span>}

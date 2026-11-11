@@ -1,20 +1,15 @@
 import { Check, Clock, FolderKanban, Pencil, Trash } from 'lucide-react'
 import type { Task } from '@/types'
+import { useI18n } from '@/i18n'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import {
-  CATEGORY_LABEL,
-  CATEGORY_STYLE,
-  PRIORITY_COLOR,
-  PRIORITY_LABEL,
-  STATUS_DOT,
-  hoursPair
-} from './taskMeta'
+import { CATEGORY_KEYS, CATEGORY_STYLE, PRIORITY_COLOR, PRIORITY_KEYS, STATUS_DOT, formatHours } from './taskMeta'
 
 export default function TaskRow({
   task,
   onToggle,
+  onComplete,
   onOpen,
   onToday,
   onEdit,
@@ -23,26 +18,30 @@ export default function TaskRow({
 }: {
   task: Task
   onToggle: () => void
+  onComplete?: () => void
   onOpen: () => void
   onToday?: () => void
   onEdit?: () => void
   onRemove?: () => void
   showTodayAction?: boolean
 }) {
+  const { t } = useI18n()
   const done = task.status === 'DONE'
-  const hours = hoursPair(task.actual_hours, task.estimated_hours)
+  const actual = formatHours(task.actual_hours)
+  const estimate = formatHours(task.estimated_hours)
   // 单条任务超了评估就标出来，别等汇总才发现
   const overrun =
     (task.actual_hours || 0) > (task.estimated_hours || 0) && (task.estimated_hours || 0) > 0
       ? Math.round(((task.actual_hours || 0) - (task.estimated_hours || 0)) * 100) / 100
       : 0
+  const hours = !actual && !estimate ? '' : actual && estimate ? `${actual} / ${estimate}` : actual ? t('hours.actual', { hours: actual }) : t('hours.estimate', { hours: estimate })
 
   return (
     <li className="group flex items-start gap-3 px-4 py-3 transition-colors hover:bg-secondary/45">
       <button
         type="button"
         onClick={onToggle}
-        aria-label={done ? '标记未完成' : '标记完成'}
+        aria-label={done ? t('taskRow.markUndone') : t('taskRow.markDone')}
         className={cn(
           'mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border transition-colors',
           done
@@ -66,18 +65,18 @@ export default function TaskRow({
           >
             {task.title}
           </button>
-          <Badge className={CATEGORY_STYLE[task.category].badge}>{CATEGORY_LABEL[task.category]}</Badge>
+          <Badge className={CATEGORY_STYLE[task.category].badge}>{t(CATEGORY_KEYS[task.category])}</Badge>
           <span className="inline-flex items-center gap-1 text-[11px]" style={{ color: PRIORITY_COLOR[task.priority] }}>
             <i className={cn('size-1.5 rounded-full', task.priority === 'MEDIUM' ? 'bg-amber-500' : 'bg-current')} />
-            {PRIORITY_LABEL[task.priority]}
+            {t(PRIORITY_KEYS[task.priority])}
           </span>
-          {task.is_today && <Badge variant="success">今日</Badge>}
+          {task.is_today && <Badge variant="success">{t('taskRow.todayBadge')}</Badge>}
         </div>
 
         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
           <span className="inline-flex items-center gap-1">
             <i className={cn('size-1.5 rounded-full', STATUS_DOT[task.status])} />
-            {done ? '已完成' : task.status === 'DOING' ? '进行中' : task.status === 'BLOCKED' ? '阻塞' : '未开始'}
+            {t(`status.${task.status}`)}
           </span>
           {task.project_name && (
             <span className="inline-flex items-center gap-1">
@@ -85,8 +84,8 @@ export default function TaskRow({
               {task.project_name}
             </span>
           )}
-          {task.scheduled_date && <span className="tabular">计划 {task.scheduled_date}</span>}
-          {task.due_date && <span className="tabular">截止 {task.due_date}</span>}
+          {task.scheduled_date && <span className="tabular">{t('taskRow.plan', { date: task.scheduled_date })}</span>}
+          {task.due_date && <span className="tabular">{t('taskRow.due', { date: task.due_date })}</span>}
           {hours && (
             <span
               className={cn(
@@ -96,7 +95,7 @@ export default function TaskRow({
             >
               <Clock className="size-3" />
               {hours}
-              {overrun > 0 && <span className="font-medium">超 {overrun}h</span>}
+              {overrun > 0 && <span className="font-medium">{t('taskRow.overrun', { hours: formatHours(overrun) })}</span>}
             </span>
           )}
           {(task.labels || []).map(label => (
@@ -114,11 +113,24 @@ export default function TaskRow({
       <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
         {showTodayAction && onToday && (
           <Button variant="ghost" size="xs" onClick={onToday}>
-            {task.is_today ? '移出' : '今日'}
+            {task.is_today ? t('taskRow.moveOutToday') : t('taskRow.addToday')}
+          </Button>
+        )}
+        {/* 已经完成的没得再完成一次，直接不渲染 */}
+        {!done && onComplete && (
+          <Button
+            variant="ghost"
+            size="xs"
+            onClick={onComplete}
+            title={t('taskRow.complete')}
+            className="text-emerald-700 hover:bg-emerald-50 hover:text-emerald-700"
+          >
+            <Check />
+            {t('taskRow.complete')}
           </Button>
         )}
         {onEdit && (
-          <Button variant="ghost" size="icon-sm" onClick={onEdit} title="编辑">
+          <Button variant="ghost" size="icon-sm" onClick={onEdit} title={t('common.edit')}>
             <Pencil />
           </Button>
         )}
@@ -127,7 +139,7 @@ export default function TaskRow({
             variant="ghost"
             size="icon-sm"
             onClick={onRemove}
-            title="删除"
+            title={t('common.delete')}
             className="text-muted-foreground hover:bg-red-50 hover:text-red-600"
           >
             <Trash />

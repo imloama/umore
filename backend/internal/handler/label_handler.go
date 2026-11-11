@@ -25,11 +25,11 @@ func (h *LabelHandler) GetAll(c *gin.Context) {
 func (h *LabelHandler) Create(c *gin.Context) {
 	var label model.Label
 	if err := c.ShouldBindJSON(&label); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		fail(c, http.StatusBadRequest, codeInvalidParams, err.Error())
 		return
 	}
 	if label.Name == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
+		fail(c, http.StatusBadRequest, codeLabelNameRequired, "name is required")
 		return
 	}
 	if err := h.Repo.CreateLabel(userID(c), &label); err != nil {
@@ -42,12 +42,12 @@ func (h *LabelHandler) Create(c *gin.Context) {
 func (h *LabelHandler) Update(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		fail(c, http.StatusBadRequest, codeInvalidID, "invalid id")
 		return
 	}
 	var label model.Label
 	if err := c.ShouldBindJSON(&label); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		fail(c, http.StatusBadRequest, codeInvalidParams, err.Error())
 		return
 	}
 	label.ID = id
@@ -61,7 +61,7 @@ func (h *LabelHandler) Update(c *gin.Context) {
 func (h *LabelHandler) Delete(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		fail(c, http.StatusBadRequest, codeInvalidID, "invalid id")
 		return
 	}
 	if err := h.Repo.DeleteLabel(userID(c), id); err != nil {

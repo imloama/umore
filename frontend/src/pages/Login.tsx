@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { CheckCircle2, KeyRound, Lock, Mail, ShieldCheck } from 'lucide-react'
-import { authApi, storeSession } from '../services/api'
+import { authApi, errorCodeOf, storeSession } from '../services/api'
+import { useI18n } from '@/i18n'
+import LanguageSwitcher from '../components/LanguageSwitcher'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -16,6 +18,7 @@ interface LoginProps {
 type Mode = 'login' | 'register'
 
 export default function Login({ hasUsers, onAuth }: LoginProps) {
+  const { t, te } = useI18n()
   const [mode, setMode] = useState<Mode>(hasUsers ? 'login' : 'register')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -55,7 +58,7 @@ export default function Login({ hasUsers, onAuth }: LoginProps) {
     setNotice('')
     const trimmed = email.trim()
     if (!trimmed) {
-      setError('先填邮箱，验证码发到邮箱里')
+      setError(t('auth.emailRequired'))
       return
     }
     setSending(true)
@@ -65,15 +68,12 @@ export default function Login({ hasUsers, onAuth }: LoginProps) {
       setCountdown(res.resend_after || 60)
       setNotice(
         res.delivery === 'log'
-          ? '验证码已生成。当前是本地调试模式，没配 Resend，请到服务端日志里看验证码。'
-          : `验证码已发到 ${trimmed}，${Math.round((res.expires_in || 600) / 60)} 分钟内有效。`
+          ? t('auth.codeNoticeLog')
+          : t('auth.codeNoticeEmail', { email: trimmed, minutes: Math.round((res.expires_in || 600) / 60) })
       )
-    } catch (err: any) {
-      const status = err.response?.status
-      setError(
-        err.response?.data?.error ||
-          (status === 429 ? '发得太频繁了，等一会儿再试' : '验证码发送失败，检查邮箱或稍后重试')
-      )
+    } catch (err: unknown) {
+      const { code } = errorCodeOf(err)
+      setError(code ? te(code) : t('auth.codeFailed'))
     } finally {
       setSending(false)
     }
@@ -86,15 +86,15 @@ export default function Login({ hasUsers, onAuth }: LoginProps) {
 
     if (isRegister) {
       if (password.length < 8) {
-        setError('密码长度至少 8 位')
+        setError(t('auth.passwordTooShort'))
         return
       }
       if (password !== confirmPassword) {
-        setError('两次密码输入不一致')
+        setError(t('auth.passwordMismatch'))
         return
       }
       if (code.trim().length !== codeLength) {
-        setError(`请填入 ${codeLength} 位验证码`)
+        setError(t('auth.codeLength', { n: codeLength }))
         return
       }
     }
@@ -108,8 +108,9 @@ export default function Login({ hasUsers, onAuth }: LoginProps) {
       storeSession(res.user, res.token)
       onAuth()
       navigate('/')
-    } catch (err: any) {
-      setError(err.response?.data?.error || (isRegister ? '注册失败' : '登录失败'))
+    } catch (err: unknown) {
+      const { code } = errorCodeOf(err)
+      setError(code ? te(code) : isRegister ? t('auth.registerFailed') : t('auth.loginFailed'))
     } finally {
       setLoading(false)
     }
@@ -121,6 +122,11 @@ export default function Login({ hasUsers, onAuth }: LoginProps) {
       <div className="pointer-events-none absolute -left-32 -top-32 size-[420px] rounded-full bg-primary/10 blur-3xl" />
       <div className="pointer-events-none absolute -bottom-40 -right-24 size-[380px] rounded-full bg-violet-500/10 blur-3xl" />
 
+      {/* 还没登录也能切语言：不然非中文用户第一屏就没法看 */}
+      <div className="absolute right-4 top-4 z-10">
+        <LanguageSwitcher />
+      </div>
+
       <div className="relative w-full max-w-[380px]">
         <div className="mb-6 flex items-center gap-2.5">
           <span className="flex size-9 items-center justify-center rounded-lg bg-primary text-base font-bold text-primary-foreground shadow-sm">
@@ -128,7 +134,7 @@ export default function Login({ hasUsers, onAuth }: LoginProps) {
           </span>
           <div>
             <div className="text-[17px] font-semibold leading-tight tracking-tight">umore</div>
-            <div className="text-[11px] leading-tight text-muted-foreground">独立开发工作台</div>
+            <div className="text-[11px] leading-tight text-muted-foreground">{t('common.appTagline')}</div>
           </div>
         </div>
 
@@ -136,8 +142,8 @@ export default function Login({ hasUsers, onAuth }: LoginProps) {
           {/* 登录 / 注册切换 */}
           <div className="mb-4 flex rounded-lg bg-secondary p-0.5 text-[13px]">
             {([
-              { key: 'login', label: '登录' },
-              { key: 'register', label: '注册' }
+              { key: 'login', label: t('auth.login') },
+              { key: 'register', label: t('auth.register') }
             ] as { key: Mode; label: string }[]).map(item => (
               <button
                 key={item.key}
@@ -156,12 +162,12 @@ export default function Login({ hasUsers, onAuth }: LoginProps) {
           </div>
 
           <p className="text-xs leading-relaxed text-muted-foreground">
-            {isRegister ? '邮箱验证码通过后才会创建账号' : '邮箱 + 密码登录'}
+            {isRegister ? t('auth.registerHint') : t('auth.loginHint')}
           </p>
 
           <form onSubmit={handleSubmit} className="mt-4 space-y-3.5">
             <div>
-              <Label htmlFor="email">邮箱</Label>
+              <Label htmlFor="email">{t('auth.email')}</Label>
               <div className="relative">
                 <Mail className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
@@ -169,7 +175,7 @@ export default function Login({ hasUsers, onAuth }: LoginProps) {
                   type="email"
                   value={email}
                   onChange={e => setEmail(e.target.value)}
-                  placeholder="you@example.com"
+                  placeholder={t('auth.emailPlaceholder')}
                   className="pl-8"
                   autoComplete="email"
                   autoFocus
@@ -180,7 +186,7 @@ export default function Login({ hasUsers, onAuth }: LoginProps) {
 
             {isRegister && (
               <div>
-                <Label htmlFor="code">邮箱验证码</Label>
+                <Label htmlFor="code">{t('auth.code')}</Label>
                 <div className="flex gap-2">
                   <div className="relative flex-1">
                     <ShieldCheck className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -190,7 +196,7 @@ export default function Login({ hasUsers, onAuth }: LoginProps) {
                       maxLength={codeLength}
                       value={code}
                       onChange={e => setCode(e.target.value.replace(/\D/g, ''))}
-                      placeholder={`${codeLength} 位数字`}
+                      placeholder={t('auth.codePlaceholder', { n: codeLength })}
                       className="pl-8 tracking-[0.3em]"
                       autoComplete="one-time-code"
                       required
@@ -203,14 +209,14 @@ export default function Login({ hasUsers, onAuth }: LoginProps) {
                     onClick={sendCode}
                     disabled={sending || countdown > 0}
                   >
-                    {sending ? '发送中…' : countdown > 0 ? `${countdown}s` : '获取验证码'}
+                    {sending ? t('auth.sending') : countdown > 0 ? `${countdown}s` : t('auth.sendCode')}
                   </Button>
                 </div>
               </div>
             )}
 
             <div>
-              <Label htmlFor="password">密码</Label>
+              <Label htmlFor="password">{t('auth.password')}</Label>
               <div className="relative">
                 <Lock className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
@@ -218,7 +224,7 @@ export default function Login({ hasUsers, onAuth }: LoginProps) {
                   type="password"
                   value={password}
                   onChange={e => setPassword(e.target.value)}
-                  placeholder={isRegister ? '至少 8 位' : '请输入密码'}
+                  placeholder={isRegister ? t('auth.passwordPlaceholderRegister') : t('auth.passwordPlaceholderLogin')}
                   className="pl-8"
                   autoComplete={isRegister ? 'new-password' : 'current-password'}
                   required
@@ -228,7 +234,7 @@ export default function Login({ hasUsers, onAuth }: LoginProps) {
 
             {isRegister && (
               <div>
-                <Label htmlFor="confirm-password">确认密码</Label>
+                <Label htmlFor="confirm-password">{t('auth.confirmPassword')}</Label>
                 <div className="relative">
                   <KeyRound className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
@@ -236,7 +242,7 @@ export default function Login({ hasUsers, onAuth }: LoginProps) {
                     type="password"
                     value={confirmPassword}
                     onChange={e => setConfirmPassword(e.target.value)}
-                    placeholder="再次输入密码"
+                    placeholder={t('auth.confirmPasswordPlaceholder')}
                     className="pl-8"
                     autoComplete="new-password"
                     required
@@ -254,15 +260,9 @@ export default function Login({ hasUsers, onAuth }: LoginProps) {
             {error && <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">{error}</div>}
 
             <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? '处理中…' : isRegister ? '验证并注册' : '登录'}
+              {loading ? t('auth.processing') : isRegister ? t('auth.submitRegister') : t('auth.submitLogin')}
             </Button>
           </form>
-
-          {/*<p className="mt-4 border-t border-border pt-3 text-[11px] leading-relaxed text-muted-foreground">
-            {isRegister
-              ? '验证码通过才算注册成功，邮箱记为本机已验证。密码同时用于派生数据加密密钥，忘了只能重建库。'
-              : '密码同时用于派生本机数据加密密钥，数据全部存在本机。'}
-          </p>*/}
         </div>
       </div>
     </div>

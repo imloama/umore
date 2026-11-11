@@ -178,8 +178,8 @@ func TestRegisterRequiresValidCode(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("验证码错 want 400, got %d: %s", w.Code, w.Body.String())
 	}
-	if body["error"] != "验证码不正确" {
-		t.Fatalf("提示不对: %v", body["error"])
+	if body["code"] != "auth_code_wrong" {
+		t.Fatalf("错误码不对: %v", body["code"])
 	}
 	if user, _ := h.Repo.GetUserByEmail("max@example.com"); user != nil {
 		t.Fatal("验证码错不该建号")
@@ -274,8 +274,9 @@ func TestLoginWrongCredentials(t *testing.T) {
 	if wrongPassword.Code != http.StatusUnauthorized || unknownEmail.Code != http.StatusUnauthorized {
 		t.Fatalf("want 401, got %d / %d", wrongPassword.Code, unknownEmail.Code)
 	}
-	if body["error"] != body2["error"] {
-		t.Fatalf("两种失败应给出同样的提示: %v vs %v", body["error"], body2["error"])
+	// 文案交给前端按错误码渲染，所以这两处必须回同一个码，别把注册情况漏出去
+	if body["code"] != body2["code"] {
+		t.Fatalf("两种失败应给出同样的错误码: %v vs %v", body["code"], body2["code"])
 	}
 }
 
@@ -305,8 +306,8 @@ func TestSendCodeNotConfigured(t *testing.T) {
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("未配置 want 503, got %d", w.Code)
 	}
-	if body["error"] != "邮件服务未配置，无法发送验证码" {
-		t.Fatalf("提示不对: %v", body["error"])
+	if body["code"] != "auth_mail_not_configured" {
+		t.Fatalf("错误码不对: %v", body["code"])
 	}
 }
 

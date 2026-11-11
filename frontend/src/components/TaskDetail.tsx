@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Timer } from 'lucide-react'
+import { Check, Timer } from 'lucide-react'
 import { taskApi } from '../services/api'
 import type { Task, TaskComment } from '../types'
+import { useI18n } from '@/i18n'
 import RichText from './RichText'
 import RichTextEditor, { type QuickInsert } from './RichTextEditor'
 import { Badge } from '@/components/ui/badge'
@@ -9,14 +10,13 @@ import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
 import { Separator } from '@/components/ui/separator'
 import { cn } from '@/lib/utils'
-import { CATEGORY_LABEL, PRIORITY_COLOR, PRIORITY_LABEL, STATUS_LABEL, STATUS_STYLE, hoursPair } from './taskMeta'
-
-const COMMENT_TEMPLATES: QuickInsert[] = [
-  { label: '进度', text: '**进度**：已完成 XXX，剩余 XXX' },
-  { label: '结论', text: '**结论**：\n\n> 这里是结论' },
-  { label: '待办', text: '- [ ] 待确认 1\n- [ ] 待确认 2' },
-  { label: '代码', text: '```go\n// 相关代码片段\n```' }
-]
+import {
+  CATEGORY_KEYS,
+  PRIORITY_COLOR,
+  PRIORITY_KEYS,
+  STATUS_STYLE,
+  formatHours
+} from './taskMeta'
 
 export const formatTime = (value?: string) => {
   if (!value) return ''
@@ -29,11 +29,31 @@ export const formatTime = (value?: string) => {
 /**
  * 任务详情 + 评论。仪表盘和任务列表共用一份，勾选完想细看就直接点开。
  * task 为 null 时关闭。
+ *
+ * onComplete 传了就显示「完成任务」：详情里看完正文和评论才决定收工的场景比列表多，
+ * 状态在组件内自己流转，省得调用方来回传 task。
  */
-export default function TaskDetail({ task, onClose }: { task: Task | null; onClose: () => void }) {
+export default function TaskDetail({
+  task,
+  onClose,
+  onComplete
+}: {
+  task: Task | null
+  onClose: () => void
+  onComplete?: (task: Task) => Promise<void> | void
+}) {
+  const { t } = useI18n()
   const [comments, setComments] = useState<TaskComment[]>([])
   const [draft, setDraft] = useState('')
   const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  const templates: QuickInsert[] = [
+    { label: t('task.tpl.progress'), text: t('task.tpl.progressText') },
+    { label: t('task.tpl.conclusion'), text: t('task.tpl.conclusionText') },
+    { label: t('task.tpl.todo'), text: t('task.tpl.todoText') },
+    { label: t('task.tpl.code'), text: t('task.tpl.codeText') }
+  ]
 
   useEffect(() => {
     if (!task?.id) {
@@ -71,6 +91,20 @@ export default function TaskDetail({ task, onClose }: { task: Task | null; onClo
     setComments(prev => prev.filter(c => c.id !== commentId))
   }
 
+  const complete = async () => {
+    if (!task || saving) return
+    setSaving(true)
+    try {
+      await onComplete?.(task)
+    } catch (error) {
+      console.error('Failed to complete task:', error)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const hours = formatHours(task?.actual_hours) || formatHours(task?.estimated_hours)
+
   return (
     <Dialog
       open={!!task}
@@ -81,29 +115,41 @@ export default function TaskDetail({ task, onClose }: { task: Task | null; onClo
           <span className="flex flex-wrap items-center gap-2">
             <span className="tabular text-xs font-normal text-muted-foreground">#{task.number}</span>
             <span>{task.title}</span>
-            <Badge>{CATEGORY_LABEL[task.category]}</Badge>
+            <Badge>{t(CATEGORY_KEYS[task.category])}</Badge>
             <span className={cn('rounded-md px-1.5 py-0.5 text-[11px] font-medium', STATUS_STYLE[task.status])}>
-              {STATUS_LABEL[task.status]}
+              {t(`status.${task.status}`)}
             </span>
           </span>
         )
       }
-      footer={<Button variant="outline" onClick={onClose}>关闭</Button>}
+      footer={
+        <>
+          <Button variant="outline" onClick={onClose}>
+            {t('task.detail.close')}
+          </Button>
+          {onComplete && task && task.status !== 'DONE' && (
+            <Button onClick={complete} disabled={saving}>
+              <Check />
+              {t('task.detail.complete')}
+            </Button>
+          )}
+        </>
+      }
     >
       {task && (
         <div className="space-y-4">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
             <span>
-              优先级：
-              <b style={{ color: PRIORITY_COLOR[task.priority] }}>{PRIORITY_LABEL[task.priority]}</b>
+              {t('task.detail.priority')}
+              <b style={{ color: PRIORITY_COLOR[task.priority] }}>{t(PRIORITY_KEYS[task.priority])}</b>
             </span>
-            {task.project_name && <span>项目：{task.project_name}</span>}
-            {task.scheduled_date && <span>计划：{task.scheduled_date}</span>}
-            {task.due_date && <span>截止：{task.due_date}</span>}
-            {(task.estimated_hours || task.actual_hours) && (
+            {task.project_name && <span>{t('task.detail.project', { name: task.project_name })}</span>}
+            {task.scheduled_date && <span>{t('task.detail.scheduled', { date: task.scheduled_date })}</span>}
+            {task.due_date && <span>{t('task.detail.due', { date: task.due_date })}</span>}
+            {hours && (
               <span className="inline-flex items-center gap-1">
                 <Timer className="size-3" />
-                {hoursPair(task.actual_hours, task.estimated_hours)}
+                {formatHours(task.actual_hours) || '0h'} / {formatHours(task.estimated_hours) || t('hours.notSet')}
               </span>
             )}
             {(task.labels || []).map(label => (
@@ -127,24 +173,26 @@ export default function TaskDetail({ task, onClose }: { task: Task | null; onClo
 
           <div>
             <div className="mb-2 flex items-center gap-2 text-[13px] font-semibold">
-              评论
-              <span className="text-[11px] font-normal text-muted-foreground">{comments.length} 条</span>
+              {t('task.detail.comments')}
+              <span className="text-[11px] font-normal text-muted-foreground">
+                {t('task.detail.commentCount', { n: comments.length })}
+              </span>
             </div>
 
-            {loading && <p className="text-xs text-muted-foreground">加载中…</p>}
+            {loading && <p className="text-xs text-muted-foreground">{t('task.detail.loadingComments')}</p>}
             {!loading && comments.length === 0 && (
-              <p className="mb-3 text-xs text-muted-foreground">还没有评论，用下面的编辑器记录进展。</p>
+              <p className="mb-3 text-xs text-muted-foreground">{t('task.detail.noComments')}</p>
             )}
 
             <ul className="mb-3 space-y-2.5">
               {comments.map((comment, index) => (
                 <li key={comment.id ?? index} className="flex gap-2.5 rounded-lg border border-border px-3 py-2.5">
                   <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-accent text-[10px] font-semibold text-accent-foreground">
-                    我
+                    {t('task.detail.me').slice(0, 1)}
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="mb-1 flex items-center gap-2">
-                      <span className="text-[12px] font-medium">我</span>
+                      <span className="text-[12px] font-medium">{t('task.detail.me')}</span>
                       <span className="text-[11px] text-muted-foreground">{formatTime(comment.created_at)}</span>
                       <Button
                         variant="ghost"
@@ -152,7 +200,7 @@ export default function TaskDetail({ task, onClose }: { task: Task | null; onClo
                         className="ml-auto text-muted-foreground hover:bg-red-50 hover:text-red-600"
                         onClick={() => remove(comment.id)}
                       >
-                        删除
+                        {t('common.delete')}
                       </Button>
                     </div>
                     <RichText source={comment.content} />
@@ -165,9 +213,9 @@ export default function TaskDetail({ task, onClose }: { task: Task | null; onClo
               value={draft}
               onChange={setDraft}
               onSubmit={submit}
-              placeholder="写点进展、结论或贴段代码…（⌘/Ctrl + Enter 发送）"
-              quickInserts={COMMENT_TEMPLATES}
-              submitLabel="发送评论"
+              placeholder={t('task.detail.commentPlaceholder')}
+              quickInserts={templates}
+              submitLabel={t('task.detail.send')}
             />
           </div>
         </div>

@@ -25,18 +25,27 @@ func userID(c *gin.Context) int {
 	return c.GetInt(CtxUserID)
 }
 
-// respondError 把仓储层错误翻成 HTTP 状态码，别把「记录不存在」也报成 500
+// 错误响应统一带两个字段：
+//   - error: 兜底文案（英文），前端正常只用来排查；界面文案由前端按 code 查表渲染
+//   - code:  稳定的错误码，多语言在前端做，后端不维护翻译
+//
+// 新增错误时在 code_* 里挑一个已有含义的，别把中文塞进 error 里——那是前端的事。
 func respondError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, gorm.ErrRecordNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		fail(c, http.StatusNotFound, codeNotFound, "not found")
 	case errors.Is(err, repository.ErrProjectNameTaken):
-		c.JSON(http.StatusConflict, gin.H{"error": "同名项目已存在"})
+		fail(c, http.StatusConflict, codeProjectNameTaken, "project name already exists")
 	case errors.Is(err, repository.ErrLabelNameTaken):
-		c.JSON(http.StatusConflict, gin.H{"error": "同名标签已存在"})
+		fail(c, http.StatusConflict, codeLabelNameTaken, "label name already exists")
 	case errors.Is(err, repository.ErrProjectNotFound):
-		c.JSON(http.StatusBadRequest, gin.H{"error": "关联的项目不存在"})
+		fail(c, http.StatusBadRequest, codeProjectNotFound, "related project not found")
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		fail(c, http.StatusInternalServerError, codeInternal, err.Error())
 	}
+}
+
+// fail 统一的错误出口：状态码 + 错误码 + 兜底文案
+func fail(c *gin.Context, status int, code, message string) {
+	c.AbortWithStatusJSON(status, gin.H{"error": message, "code": code})
 }

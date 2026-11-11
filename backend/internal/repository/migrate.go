@@ -19,7 +19,45 @@ func (r *Repository) Migrate() error {
 	if err := r.BackfillNicknames(); err != nil {
 		return fmt.Errorf("backfill nickname: %w", err)
 	}
+	if err := r.BackfillReceivableIncome(); err != nil {
+		return fmt.Errorf("backfill receivable income: %w", err)
+	}
 	r.dropLegacy()
+	return nil
+}
+
+// BackfillReceivableIncome 给「标记已收」之前就已完成、却没留下收入流水的收款计划补账。
+//
+// 标记已收现在会顺手落一笔 income 流水（项目的已收款靠它汇总），
+// 但老库里 done 的那些没有对应流水，页面上会一直显示 0。补的时候按 done_at 落日期，
+// 已经补过的（receivable_id 有值）跳过，反复启动不会加重。
+func (r *Repository) BackfillReceivableIncome() error {
+	var pending []model.Receivable
+	if err := r.db.Where("status = ?", "done").
+		Where("id NOT IN (?)", r.db.Model(&model.Finance{}).
+			Select("receivable_id").Where("receivable_id IS NOT NULL")).
+		Find(&pending).Error; err != nil {
+		return err
+	}
+	for _, item := range pending {
+		date := item.UpdatedAt.Format("2006-01-02")
+		if item.DoneAt != nil {
+			date = item.DoneAt.Format("2006-01-02")
+		}
+		income := model.Finance{
+			UserID:       item.UserID,
+			Type:         "income",
+			Amount:       item.Amount,
+			Category:     item.Title,
+			Description:  "收款计划到账",
+			Date:         date,
+			ProjectID:    item.ProjectID,
+			ReceivableID: &item.ID,
+		}
+		if err := r.db.Create(&income).Error; err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

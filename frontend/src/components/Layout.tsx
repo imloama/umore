@@ -19,48 +19,55 @@ import {
 } from 'lucide-react'
 import { currentUser, subscribeUser } from '../services/api'
 import type { AuthUser } from '../types'
+import { useI18n, type MessageKey } from '../i18n'
 import Avatar from './Avatar'
 import QuickCreate from './QuickCreate'
+import LanguageSwitcher from './LanguageSwitcher'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
 interface NavItem {
   path: string
-  label: string
+  labelKey: MessageKey
   icon: typeof LayoutDashboard
+}
+
+interface NavGroup {
+  titleKey: MessageKey
+  items: NavItem[]
 }
 
 // 分组按「一天怎么用」排，不按模块类型排：
 // 工作台是每天进门先看的地方，项目是接单主线（商机赢单才变项目，不能拆两处），
 // 收支是钱的两头，设置放不常点但必须找得到的东西。
-const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
+const NAV_GROUPS: NavGroup[] = [
   {
-    title: '工作台',
+    titleKey: 'nav.group.workspace',
     items: [
-      { path: '/', label: '仪表盘', icon: LayoutDashboard },
-      { path: '/today', label: '今日', icon: Sun },
-      { path: '/tasks', label: '任务', icon: ListTodo },
-      { path: '/calendar', label: '日历', icon: CalendarDays },
-      { path: '/ideas', label: '灵感', icon: Lightbulb }
+      { path: '/', labelKey: 'nav.dashboard', icon: LayoutDashboard },
+      { path: '/today', labelKey: 'nav.today', icon: Sun },
+      { path: '/tasks', labelKey: 'nav.tasks', icon: ListTodo },
+      { path: '/calendar', labelKey: 'nav.calendar', icon: CalendarDays },
+      { path: '/ideas', labelKey: 'nav.ideas', icon: Lightbulb }
     ]
   },
   {
-    title: '项目',
+    titleKey: 'nav.group.projects',
     items: [
-      { path: '/opportunities', label: '商机', icon: Briefcase },
-      { path: '/projects', label: '项目', icon: FolderKanban }
+      { path: '/opportunities', labelKey: 'nav.opportunities', icon: Briefcase },
+      { path: '/projects', labelKey: 'nav.projects', icon: FolderKanban }
     ]
   },
   {
-    title: '收支',
+    titleKey: 'nav.group.money',
     items: [
-      { path: '/receivables', label: '回款', icon: HandCoins },
-      { path: '/finances', label: '财务', icon: Wallet }
+      { path: '/receivables', labelKey: 'nav.receivables', icon: HandCoins },
+      { path: '/finances', labelKey: 'nav.finances', icon: Wallet }
     ]
   },
   {
-    title: '设置',
-    items: [{ path: '/profile', label: '个人资料', icon: UserRound }]
+    titleKey: 'nav.group.settings',
+    items: [{ path: '/profile', labelKey: 'nav.profile', icon: UserRound }]
   }
 ]
 
@@ -69,6 +76,7 @@ const ALL_ITEMS = NAV_GROUPS.flatMap(g => g.items)
 export default function Layout({ onLogout }: { onLogout: () => void }) {
   const location = useLocation()
   const navigate = useNavigate()
+  const { t } = useI18n()
   const [menuOpen, setMenuOpen] = useState(false)
   const [keyword, setKeyword] = useState('')
   // 底部显示当前用户的昵称，改完资料会跟着变
@@ -81,7 +89,7 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
   // 面包屑用「分组 / 页面」两级，找不到时兜个底，免得顶栏空着
   const currentGroup = NAV_GROUPS.find(group => group.items.some(item => item.path === location.pathname))
   const current = ALL_ITEMS.find(item => item.path === location.pathname)
-  const crumbGroup = currentGroup && currentGroup.title !== current?.label ? currentGroup.title : null
+  const crumbGroupKey = currentGroup && currentGroup.titleKey !== current?.labelKey ? currentGroup.titleKey : null
 
   const handleLogout = () => {
     // 退出登录的活交给 App：先通知服务端作废会话，再清本地并置空登录态。
@@ -111,14 +119,14 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
             </span>
             <span className="min-w-0">
               <span className="block text-[15px] font-semibold leading-tight tracking-tight">umore</span>
-              <span className="block text-[10px] leading-tight text-muted-foreground">独立开发工作台</span>
+              <span className="block text-[10px] leading-tight text-muted-foreground">{t('common.appTagline')}</span>
             </span>
           </Link>
           <button
             type="button"
             className="rounded-md p-1 text-muted-foreground hover:bg-accent md:hidden"
             onClick={() => setMenuOpen(false)}
-            aria-label="收起菜单"
+            aria-label={t('nav.collapseMenu')}
           >
             <X className="size-4" />
           </button>
@@ -126,9 +134,9 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
 
         <nav className="scrollbar-thin flex h-[calc(100vh-3.5rem-3.75rem)] flex-col gap-4 overflow-y-auto px-3 py-4">
           {NAV_GROUPS.map(group => (
-            <div key={group.title}>
+            <div key={group.titleKey}>
               <div className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/70">
-                {group.title}
+                {t(group.titleKey)}
               </div>
               <div className="flex flex-col gap-0.5">
                 {group.items.map(item => {
@@ -146,7 +154,7 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
                       )}
                     >
                       <Icon className={cn('size-4', active ? 'text-primary' : 'text-muted-foreground')} />
-                      <span>{item.label}</span>
+                      <span>{t(item.labelKey)}</span>
                     </Link>
                   )
                 })}
@@ -159,15 +167,15 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
           <Link
             to="/profile"
             className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-1 transition-colors hover:bg-accent"
-            title="个人资料"
+            title={t('nav.profile')}
           >
             <Avatar user={user} size="size-8" />
             <div className="min-w-0 flex-1">
-              <div className="truncate text-[13px] font-medium leading-tight">{user?.nickname || '未登录'}</div>
+              <div className="truncate text-[13px] font-medium leading-tight">{user?.nickname || '—'}</div>
               <div className="truncate text-[10px] leading-tight text-muted-foreground">{user?.email || ''}</div>
             </div>
           </Link>
-          <Button variant="ghost" size="icon-sm" onClick={handleLogout} title="退出登录">
+          <Button variant="ghost" size="icon-sm" onClick={handleLogout} title={t('nav.logout')}>
             <LogOut />
           </Button>
         </div>
@@ -184,20 +192,20 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
             type="button"
             className="rounded-md p-1.5 text-muted-foreground hover:bg-accent md:hidden"
             onClick={() => setMenuOpen(true)}
-            aria-label="打开菜单"
+            aria-label={t('nav.openMenu')}
           >
             <Menu className="size-5" />
           </button>
 
           <div className="flex min-w-0 items-center gap-1.5 text-[13px] text-muted-foreground">
             {/* 分组名和页面名撞了（项目 > 项目）就只留一层，省得看着像 bug */}
-            {crumbGroup && (
+            {crumbGroupKey && (
               <>
-                <span className="hidden sm:inline">{crumbGroup}</span>
+                <span className="hidden sm:inline">{t(crumbGroupKey)}</span>
                 <ChevronRight className="hidden size-3.5 sm:inline" />
               </>
             )}
-            <span className="truncate font-medium text-foreground">{current?.label ?? '页面'}</span>
+            <span className="truncate font-medium text-foreground">{current ? t(current.labelKey) : t('nav.page')}</span>
           </div>
 
           <div className="ml-auto flex items-center gap-2">
@@ -207,10 +215,11 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
                 value={keyword}
                 onChange={e => setKeyword(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && search()}
-                placeholder="搜索任务…"
+                placeholder={t('nav.searchTasks')}
                 className="h-8 w-52 rounded-md border border-input bg-card pl-8 pr-2.5 text-[13px] shadow-sm transition-colors placeholder:text-muted-foreground/70 focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 lg:w-64"
               />
             </div>
+            <LanguageSwitcher />
             {/* 一个入口管所有随手记：任务、问题、需求、商机、灵感、项目 */}
             <QuickCreate />
           </div>
