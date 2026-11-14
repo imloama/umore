@@ -40,6 +40,17 @@ func (a Amount) Sub(b Amount) Amount { return Amount{a.Decimal.Sub(b.Decimal).Ro
 // 落库前每个值都已经截到分，这里再归一次，两种库上的汇总结果就一致了。
 func (a Amount) Normalize() Amount { return Amount{a.Decimal.Round(2)} }
 
+// IsZero 判断是不是 0 元。
+// 显式声明一个：Amount 内嵌了 decimal.Decimal，方法提升进来的语义看着一样，
+// 但谁都可能改内嵌类型，钱上少一层隐式依赖。
+func (a Amount) IsZero() bool { return a.Decimal.IsZero() }
+
+// IsNegative 判断是不是负数，入参校验用
+func (a Amount) IsNegative() bool { return a.Decimal.IsNegative() }
+
+// Equal 比较两个金额是否相等，按分比
+func (a Amount) Equal(b Amount) bool { return a.Decimal.Equal(b.Decimal) }
+
 // Neg 取负，用于「支出」这类方向相反的汇总
 func (a Amount) Neg() Amount { return Amount{a.Decimal.Neg()} }
 

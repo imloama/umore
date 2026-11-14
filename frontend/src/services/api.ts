@@ -6,12 +6,14 @@ import type {
   Label,
   Project,
   ProjectAmountChange,
+  ProjectStatusChange,
   Receivable,
   ReceivableSummary,
   Task,
   TaskComment,
   TaskFilter,
-  TaskStats
+  TaskStats,
+  TodayInfo
 } from '../types'
 import axios from 'axios'
 
@@ -28,8 +30,18 @@ if (isStaticPreview) {
   const previewPayload = (url = '') => {
     if (url.includes('/auth/check-setup')) return { setup_completed: true, has_users: true }
     if (url.includes('/tasks/stats')) {
-      return { by_category: {}, by_status: {}, today_total: 0, today_done: 0, today_estimated_hours: 0, today_actual_hours: 0 }
+      return {
+        by_category: {},
+        by_status: {},
+        today_total: 0,
+        today_done: 0,
+        today_estimated_hours: 0,
+        today_actual_hours: 0,
+        today_date: new Date().toISOString().slice(0, 10),
+        timezone: 'Asia/Shanghai'
+      }
     }
+    if (url.includes('/tasks/today')) return { today: new Date().toISOString().slice(0, 10), timezone: 'Asia/Shanghai' }
     if (url.includes('/finances/summary')) return { total_income: 0, total_expense: 0, balance: 0 }
     if (url.includes('/receivables/summary')) {
       return {
@@ -102,9 +114,11 @@ export const authApi = {
   logout: (token?: string) =>
     api.post('/auth/logout', null, token ? { headers: { Authorization: `Bearer ${token}` } } : undefined),
   me: () => api.get<any, { user: AuthUser }>('/auth/me'),
-  /** 改昵称 / 头像地址：没传的字段保持原样 */
-  updateProfile: (payload: { nickname?: string; avatar?: string }) =>
+  /** 改昵称 / 头像地址 / 时区：没传的字段保持原样 */
+  updateProfile: (payload: { nickname?: string; avatar?: string; timezone?: string }) =>
     api.put<any, { user: AuthUser }>('/auth/profile', payload),
+  /** 个人中心时区下拉的候选项 */
+  timezones: () => api.get<any, { timezones: string[]; default: string }>('/auth/timezones'),
   changePassword: (oldPassword: string, newPassword: string) =>
     api.post<any, { message: string }>('/auth/password', { old_password: oldPassword, new_password: newPassword }),
   /** 头像走上传，返回落库后的地址 */
@@ -181,9 +195,11 @@ const buildTaskQuery = (filter: TaskFilter = {}) => {
   if (filter.label) params.set('label', filter.label)
   if (filter.keyword) params.set('keyword', filter.keyword)
   if (filter.today) params.set('today', '1')
+  if (filter.today_date) params.set('today_date', filter.today_date)
   if (filter.date) params.set('date', filter.date)
   if (filter.start_date) params.set('start_date', filter.start_date)
   if (filter.end_date) params.set('end_date', filter.end_date)
+  if (filter.include_archived) params.set('include_archived', '1')
   const query = params.toString()
   return query ? `?${query}` : ''
 }
@@ -199,6 +215,8 @@ export const taskApi = {
   reorderToday: (items: { id: number; today_order: number }[]) =>
     api.put('/tasks/reorder', items),
   stats: () => api.get<any, TaskStats>('/tasks/stats'),
+  /** 用户时区里的今天：页面上的「今日」标题、日期都取这里，别用浏览器本地日期 */
+  today: () => api.get<any, TodayInfo>('/tasks/today'),
   comments: (id: number) => api.get<any, TaskComment[]>(`/tasks/${id}/comments`),
   addComment: (id: number, content: string) =>
     api.post<any, TaskComment>(`/tasks/${id}/comments`, { content }),
@@ -286,12 +304,18 @@ export const errorCodeOf = (err: unknown) => {
 }
 
 export const projectApi = {
-  list: () => api.get<any, Project[]>('/projects'),
+  /** status 为空回全部（含归档），传 archived 只回归档的 */
+  list: (status?: Project['status']) =>
+    api.get<any, Project[]>(`/projects${status ? `?status=${status}` : ''}`),
   get: (id: number) => api.get<any, Project>(`/projects/${id}`),
   create: (project: Partial<Project>) => api.post<any, Project>('/projects', project),
   update: (id: number, project: Partial<Project>, amountChangeReason?: string) =>
     api.put<any, Project>(`/projects/${id}`, { ...project, amount_change_reason: amountChangeReason }),
   remove: (id: number) => api.delete(`/projects/${id}`),
+  /** 归档 / 恢复。归档后这个项目的任务、看板、回款都不再出现在日常视图里 */
+  setArchived: (id: number, archived: boolean) =>
+    api.put<any, Project>(`/projects/${id}/archive`, { archived }),
+  statusChanges: (id: number) => api.get<any, ProjectStatusChange[]>(`/projects/${id}/status-changes`),
   amountChanges: (id: number) => api.get<any, ProjectAmountChange[]>(`/projects/${id}/amount-changes`),
   addAmountChange: (id: number, newAmount: number, reason: string) =>
     api.post<any, ProjectAmountChange>(`/projects/${id}/amount-changes`, { new_amount: newAmount, reason }),
@@ -304,10 +328,12 @@ export const projectApi = {
 }
 
 export const receivableApi = {
-  list: (params: { status?: string; project_id?: number } = {}) => {
+  /** include_archived 打开时连归档项目名下的收款计划一起回来（翻旧账用） */
+  list: (params: { status?: string; project_id?: number; include_archived?: boolean } = {}) => {
     const query = new URLSearchParams()
     if (params.status) query.set('status', params.status)
     if (params.project_id) query.set('project_id', String(params.project_id))
+    if (params.include_archived) query.set('include_archived', '1')
     const qs = query.toString()
     return api.get<any, Receivable[]>(`/receivables${qs ? `?${qs}` : ''}`)
   },

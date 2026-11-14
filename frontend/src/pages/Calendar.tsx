@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
-import api, { taskApi } from '../services/api'
+import api, { projectApi, taskApi } from '../services/api'
 import type { Project, Task } from '../types'
 import { useI18n } from '@/i18n'
 import PageHeader from '../components/PageHeader'
@@ -89,7 +89,11 @@ export default function Calendar() {
   const rangeEnd = cells[cells.length - 1]?.key
 
   useEffect(() => {
-    api.get<any, Project[]>('/projects').then(res => setProjects(res || [])).catch(console.error)
+    // 项目筛选只列在做的：归档项目的任务不进日历
+    projectApi
+      .list('active')
+      .then(res => setProjects(res || []))
+      .catch(console.error)
   }, [])
 
   const loadTasks = async () => {

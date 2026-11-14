@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { ListFilter, Plus, Search, Timer, X } from 'lucide-react'
-import { labelApi, taskApi, errorCodeOf } from '../services/api'
-import api from '../services/api'
+import { labelApi, projectApi, taskApi, errorCodeOf } from '../services/api'
 import type { Label, Project, Task, TaskCategory, TaskPriority, TaskStatus } from '../types'
 import { useI18n } from '@/i18n'
 import TaskDetail from '../components/TaskDetail'
@@ -26,8 +25,7 @@ import {
   STATUS_KEYS,
   STATUS_ORDER,
   STATUS_STYLE,
-  formatHours,
-  todayStr
+  formatHours
 } from '../components/taskMeta'
 
 const emptyForm = (): Task => ({
@@ -68,6 +66,10 @@ export default function Tasks({ todayMode = false }: { todayMode?: boolean }) {
   })
   const [loading, setLoading] = useState(false)
   const [detail, setDetail] = useState<Task | null>(null)
+  // 今日页：今天该做的，和「今天不该做但也没完成」的两栏。
+  // 「今天」由后端按用户时区给（today_date），不用浏览器本地日期——两边可能差一天。
+  const [pendingTasks, setPendingTasks] = useState<Task[]>([])
+  const [todayDate, setTodayDate] = useState('')
 
   // 顶栏「新建任务」带 ?new=1 跳进来，直接开表单
   useEffect(() => {
@@ -92,7 +94,8 @@ export default function Tasks({ todayMode = false }: { todayMode?: boolean }) {
     setLoading(true)
     try {
       const [projectList, labelList] = await Promise.all([
-        api.get<any, Project[]>('/projects'),
+        // 下拉里只列在做的项目：归档的项目不再接活
+        projectApi.list('active'),
         labelApi.list()
       ])
       setProjects(projectList || [])
@@ -106,6 +109,18 @@ export default function Tasks({ todayMode = false }: { todayMode?: boolean }) {
   }
 
   const loadTasks = async () => {
+    if (todayMode) {
+      const info = await taskApi.today().catch(() => null)
+      const today = info?.today || ''
+      setTodayDate(today)
+      const [due, pending] = await Promise.all([
+        taskApi.list({ today: true, today_date: today || undefined }),
+        taskApi.list({ today: true, today_date: today ? `!${today}` : undefined })
+      ])
+      setTasks(due || [])
+      setPendingTasks(pending || [])
+      return
+    }
     const data = await taskApi.list({
       today: todayMode || undefined,
       category: filters.category || undefined,
@@ -138,6 +153,10 @@ export default function Tasks({ todayMode = false }: { todayMode?: boolean }) {
     })
     return map
   }, [tasks])
+
+  // 今日页的顺序：还有活的排前面，今天勾掉的收在最后一栏——
+  // b 的任务「开始的日期 ≤ 今天 ≤ 结束的日期」和「今天完成」都算今日任务，完成的不该冒在最上头
+  const todayOrder: TaskStatus[] = ['DOING', 'TODO', 'BLOCKED', 'DONE']
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -213,7 +232,7 @@ export default function Tasks({ todayMode = false }: { todayMode?: boolean }) {
     <div>
       <PageHeader
         eyebrow={todayMode ? 'TODAY' : 'TASKS'}
-        title={todayMode ? t('task.titleToday', { date: todayStr() }) : t('task.title')}
+        title={todayMode ? t('task.titleToday', { date: todayDate || '—' }) : t('task.title')}
         description={todayMode ? t('task.descriptionToday') : t('task.description')}
         actions={
           <Button
@@ -349,18 +368,33 @@ export default function Tasks({ todayMode = false }: { todayMode?: boolean }) {
         </div>
       )}
 
-      {!loading && tasks.length === 0 && (
+      {!loading && !todayMode && tasks.length === 0 && (
         <Card className="flex flex-col items-center justify-center gap-2 px-6 py-14 text-center">
           <ListFilter className="size-6 text-muted-foreground/60" />
           <div className="text-sm font-medium">{t('task.empty')}</div>
-          <div className="text-xs text-muted-foreground">
-            {todayMode ? t('task.emptyToday') : t('task.emptyList')}
-          </div>
+          <div className="text-xs text-muted-foreground">{t('task.emptyList')}</div>
         </Card>
       )}
 
+      {/* 今日页先给标题：下面这堆是按状态分组的「今天该做」 */}
+      {!loading && todayMode && tasks.length > 0 && (
+        <div className="mb-2 flex items-center gap-2 px-1">
+          <span className="text-[12px] font-semibold">{t('task.group.should')}</span>
+          <span className="tabular text-[11px] text-muted-foreground">{tasks.length}</span>
+        </div>
+      )}
+
+      {!loading && todayMode && tasks.length === 0 && (
+        <Card className="mb-3 flex flex-col items-center justify-center gap-2 px-6 py-10 text-center">
+          <ListFilter className="size-6 text-muted-foreground/60" />
+          <div className="text-sm font-medium">{t('task.group.shouldEmpty')}</div>
+          <div className="text-xs text-muted-foreground">{t('task.emptyToday')}</div>
+        </Card>
+      )}
+
+
       {!loading &&
-        STATUS_ORDER.map(status => {
+        (todayMode ? todayOrder : STATUS_ORDER).map(status => {
           const items = grouped[status] || []
           if (items.length === 0) return null
           const hours = items.reduce((s, t2) => s + (t2.actual_hours || 0), 0)
@@ -372,6 +406,9 @@ export default function Tasks({ todayMode = false }: { todayMode?: boolean }) {
                   {t(STATUS_KEYS[status])}
                 </span>
                 <span className="tabular text-[11px] text-muted-foreground">{items.length}</span>
+                {todayMode && status === 'DONE' && (
+                  <span className="text-[11px] text-muted-foreground">{t('task.group.doneHint')}</span>
+                )}
                 {(hours > 0 || estimates > 0) && (
                   <span className="tabular ml-auto text-[11px] text-muted-foreground">
                     {t('task.stats.groupHours', {
@@ -398,6 +435,31 @@ export default function Tasks({ todayMode = false }: { todayMode?: boolean }) {
             </Card>
           )
         })}
+
+      {/* 今天不该做、但也没收尾的（过期 / 未开始）：单独一栏，不进上面的统计 */}
+      {!loading && todayMode && pendingTasks.length > 0 && (
+        <Card className="mb-3 overflow-hidden border-dashed">
+          <div className="flex flex-wrap items-center gap-2 border-b border-border bg-secondary/30 px-4 py-2">
+            <span className="rounded-md bg-secondary px-1.5 py-0.5 text-[11px] font-medium">{t('task.group.pending')}</span>
+            <span className="tabular text-[11px] text-muted-foreground">{pendingTasks.length}</span>
+            <span className="ml-auto text-[11px] text-muted-foreground">{t('task.group.pendingHint')}</span>
+          </div>
+          <ul className="divide-y divide-border">
+            {pendingTasks.map(task => (
+              <TaskRow
+                key={task.id}
+                task={task}
+                onOpen={() => openDetail(task)}
+                onToggle={() => changeStatus(task, task.status === 'DONE' ? 'TODO' : 'DONE')}
+                onComplete={() => completeTask(task)}
+                onToday={() => toggleToday(task)}
+                onEdit={() => edit(task)}
+                onRemove={() => remove(task.id!)}
+              />
+            ))}
+          </ul>
+        </Card>
+      )}
 
       {!todayMode && !loading && labels.length > 0 && (
         <Card className="mt-4 px-4 py-3">

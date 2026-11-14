@@ -30,7 +30,7 @@ func TestReceivableLifecycle(t *testing.T) {
 			}
 		}
 
-		list, err := repo.GetReceivables(uid, "pending", 0)
+		list, err := repo.GetReceivables(uid, "pending", 0, false)
 		if err != nil {
 			t.Fatalf("list receivables: %v", err)
 		}
@@ -58,7 +58,7 @@ func TestReceivableLifecycle(t *testing.T) {
 			t.Fatalf("update receivable: %v", err)
 		}
 		reloaded, _ := repo.GetReceivable(uid, overdue.ID)
-		if reloaded.Note != "客户说月底给" || !reloaded.Amount.Equal(model.Money("20000").Decimal) {
+		if reloaded.Note != "客户说月底给" || !reloaded.Amount.Equal(model.Money("20000")) {
 			t.Fatalf("改备注没生效: %+v", reloaded)
 		}
 		if !reloaded.Overdue {
@@ -70,13 +70,13 @@ func TestReceivableLifecycle(t *testing.T) {
 		if err != nil {
 			t.Fatalf("summary: %v", err)
 		}
-		if sum.PendingCount != 2 || !sum.PendingAmount.Equal(model.Money("62000").Decimal) {
+		if sum.PendingCount != 2 || !sum.PendingAmount.Equal(model.Money("62000")) {
 			t.Fatalf("未收合计不对: %+v", sum)
 		}
-		if sum.OverdueCount != 1 || !sum.OverdueAmount.Equal(model.Money("20000").Decimal) {
+		if sum.OverdueCount != 1 || !sum.OverdueAmount.Equal(model.Money("20000")) {
 			t.Fatalf("逾期合计不对: %+v", sum)
 		}
-		if sum.DueSoonCount != 1 || !sum.DueSoonAmount.Equal(model.Money("42000").Decimal) {
+		if sum.DueSoonCount != 1 || !sum.DueSoonAmount.Equal(model.Money("42000")) {
 			t.Fatalf("7 天内到期不对: %+v", sum)
 		}
 
@@ -90,7 +90,7 @@ func TestReceivableLifecycle(t *testing.T) {
 		}
 		sum, _ = repo.GetReceivableSummary(uid)
 		if sum.PendingCount != 1 || sum.OverdueCount != 0 || sum.DoneCount != 1 ||
-			!sum.DoneAmount.Equal(model.Money("20000").Decimal) {
+			!sum.DoneAmount.Equal(model.Money("20000")) {
 			t.Fatalf("标记已收后汇总不对: %+v", sum)
 		}
 
@@ -106,7 +106,7 @@ func TestReceivableLifecycle(t *testing.T) {
 		if err := repo.DeleteReceivable(uid, willDue.ID); err != nil {
 			t.Fatalf("delete receivable: %v", err)
 		}
-		if rest, _ := repo.GetReceivables(uid, "", 0); len(rest) != 1 {
+		if rest, _ := repo.GetReceivables(uid, "", 0, false); len(rest) != 1 {
 			t.Fatalf("删除后应该只剩 1 条，实际 %d", len(rest))
 		}
 	})
@@ -138,10 +138,10 @@ func TestProjectReceivableSummary(t *testing.T) {
 	}
 
 	got, _ := repo.GetProject(uid, project.ID)
-	if got.ReceivableCount != 2 || !got.ReceivableAmount.Equal(model.Money("60000").Decimal) {
+	if got.ReceivableCount != 2 || !got.ReceivableAmount.Equal(model.Money("60000")) {
 		t.Fatalf("项目待收款汇总不对: %+v", got)
 	}
-	if !got.ReceivableOverdue.Equal(model.Money("30000").Decimal) {
+	if !got.ReceivableOverdue.Equal(model.Money("30000")) {
 		t.Fatalf("项目逾期金额不对: %+v", got)
 	}
 	if got.NextDueDate != past {
@@ -152,7 +152,7 @@ func TestProjectReceivableSummary(t *testing.T) {
 		t.Fatalf("set status: %v", err)
 	}
 	after, _ := repo.GetProject(uid, project.ID)
-	if after.ReceivableCount != 1 || !after.ReceivableAmount.Equal(model.Money("30000").Decimal) ||
+	if after.ReceivableCount != 1 || !after.ReceivableAmount.Equal(model.Money("30000")) ||
 		!after.ReceivableOverdue.IsZero() {
 		t.Fatalf("标记已收后项目汇总不对: %+v", after)
 	}
@@ -176,7 +176,7 @@ func TestReceivableOrdering(t *testing.T) {
 		}
 	}
 
-	list, err := repo.GetReceivables(uid, "", 0)
+	list, err := repo.GetReceivables(uid, "", 0, false)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -215,13 +215,13 @@ func TestReceivableDoneSyncsIncome(t *testing.T) {
 		t.Fatalf("set status: %v", err)
 	}
 	got, _ := repo.GetProject(uid, project.ID)
-	if !got.Received.Equal(model.Money("18000").Decimal) {
+	if !got.Received.Equal(model.Money("18000")) {
 		t.Fatalf("标记已收后项目已收不对: %s", got.Received)
 	}
 
 	today := time.Now().Format("2006-01-02")
 	sum, _ := repo.GetFinanceSummary(uid, today, today)
-	if !sum.TotalIncome.Equal(model.Money("18000").Decimal) {
+	if !sum.TotalIncome.Equal(model.Money("18000")) {
 		t.Fatalf("财务总收入没跟着更新: %s", sum.TotalIncome)
 	}
 
@@ -230,7 +230,7 @@ func TestReceivableDoneSyncsIncome(t *testing.T) {
 		t.Fatalf("set status again: %v", err)
 	}
 	again, _ := repo.GetProject(uid, project.ID)
-	if !again.Received.Equal(model.Money("18000").Decimal) {
+	if !again.Received.Equal(model.Money("18000")) {
 		t.Fatalf("重复标记已收把金额加了两遍: %s", again.Received)
 	}
 
@@ -241,7 +241,7 @@ func TestReceivableDoneSyncsIncome(t *testing.T) {
 		t.Fatalf("update receivable: %v", err)
 	}
 	edited, _ := repo.GetProject(uid, project.ID)
-	if !edited.Received.Equal(model.Money("20000").Decimal) {
+	if !edited.Received.Equal(model.Money("20000")) {
 		t.Fatalf("改金额后流水没跟上: %s", edited.Received)
 	}
 
@@ -294,7 +294,7 @@ func TestReceivableRevertKeepsManualIncome(t *testing.T) {
 	}
 
 	got, _ := repo.GetProject(uid, project.ID)
-	if !got.Received.Equal(model.Money("5000").Decimal) {
+	if !got.Received.Equal(model.Money("5000")) {
 		t.Fatalf("撤回时误删了手记的收入: %s", got.Received)
 	}
 }
@@ -318,7 +318,7 @@ func TestBackfillReceivableIncome(t *testing.T) {
 		t.Fatalf("migrate: %v", err)
 	}
 	got, _ := repo.GetProject(uid, project.ID)
-	if !got.Received.Equal(model.Money("12000").Decimal) {
+	if !got.Received.Equal(model.Money("12000")) {
 		t.Fatalf("补账后项目已收不对: %s", got.Received)
 	}
 
@@ -327,7 +327,7 @@ func TestBackfillReceivableIncome(t *testing.T) {
 		t.Fatalf("migrate again: %v", err)
 	}
 	again, _ := repo.GetProject(uid, project.ID)
-	if !again.Received.Equal(model.Money("12000").Decimal) {
+	if !again.Received.Equal(model.Money("12000")) {
 		t.Fatalf("重复补账把金额加了两遍: %s", again.Received)
 	}
 }

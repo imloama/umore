@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AlertTriangle, ArrowRight, Briefcase, CalendarClock, CircleCheckBig, FolderKanban, Timer, TrendingDown, TrendingUp, Wallet } from 'lucide-react'
-import api, { receivableApi, taskApi } from '../services/api'
+import api, { projectApi, receivableApi, taskApi } from '../services/api'
 import type { Project, Receivable, ReceivableSummary, Task, TaskStats } from '../types'
 import { useI18n } from '../i18n'
 import PageHeader from '../components/PageHeader'
@@ -31,7 +31,9 @@ const EMPTY_STATS: TaskStats = {
   today_total: 0,
   today_done: 0,
   today_estimated_hours: 0,
-  today_actual_hours: 0
+  today_actual_hours: 0,
+  today_date: '',
+  timezone: ''
 }
 
 export default function Dashboard() {
@@ -50,19 +52,23 @@ export default function Dashboard() {
 
   const loadStats = async () => {
     try {
-      const today = new Date().toISOString().split('T')[0]
-      const firstDay = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]
+      // 「今天」用后端按用户时区算出来的那天：本月的账也从这天回推，别用浏览器本地日期
+      const todayInfo = await taskApi.today().catch(() => null)
+      const today = todayInfo?.today || new Date().toISOString().split('T')[0]
+      const firstDay = `${today.slice(0, 7)}-01`
 
       const [taskStats, todayList, projectList, finances, receivableList, receivableSummary] = await Promise.all([
         taskApi.stats(),
-        taskApi.list({ today: true }),
-        api.get<any, Project[]>('/projects'),
+        // 今日任务：没完成 + 今天在开始与结束时间之间，后端按用户时区判定
+        taskApi.list({ today: true, today_date: todayInfo?.today }),
+        // 首页的「在做项目」与累计投入都不带归档项目：归档了就不再算它的账
+        projectApi.list('active'),
         api.get<any, any>('/finances/summary', { params: { start_date: firstDay, end_date: today } }),
         receivableApi.list({ status: 'pending' }),
         receivableApi.summary()
       ])
 
-      setStats(taskStats)
+      setStats({ ...taskStats, today_date: taskStats.today_date || today })
       setTodayTasks(todayList || [])
       setProjects(projectList || [])
       setMonthlyBalance(finances?.balance || 0)
@@ -104,7 +110,12 @@ export default function Dashboard() {
         {/* 主卡：今日进度 */}
         <div className="relative overflow-hidden rounded-lg bg-gradient-to-br from-primary to-blue-600 px-4 py-3.5 text-white shadow-sm sm:col-span-2 xl:col-span-1">
           <div className="flex items-center justify-between text-[11px] text-blue-100">
-            <span>{t('dashboard.todayProgress')}</span>
+            <span>
+              {t('dashboard.todayProgress')}
+              {stats.today_date && (
+                <span className="ml-1 opacity-80">{t('dashboard.todayOf', { date: stats.today_date })}</span>
+              )}
+            </span>
             <CircleCheckBig className="size-4" />
           </div>
           <div className="tabular mt-2 text-3xl font-semibold">

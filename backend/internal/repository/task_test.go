@@ -16,8 +16,10 @@ func TestTaskLifecycle(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 
+	today := repo.TodayFor(uid)
 	task := &model.Task{
 		Title: "写报价", Category: "todo", ProjectID: &project.ID,
+		ScheduledDate:  &today,
 		EstimatedHours: 4, ActualHours: 3, IsToday: true,
 		Labels: []model.Label{{Name: "重要"}, {Name: "报价"}},
 	}
@@ -40,7 +42,8 @@ func TestTaskLifecycle(t *testing.T) {
 	}
 
 	// 标签复用：同名标签不会建出第二条
-	second := &model.Task{Title: "另一个", Category: "todo", Labels: []model.Label{{Name: "重要"}}}
+	second := &model.Task{Title: "另一个", Category: "todo", ScheduledDate: &today,
+		Labels: []model.Label{{Name: "重要"}}}
 	if err := repo.CreateTask(uid, second); err != nil {
 		t.Fatalf("重复标签应能插入: %v", err)
 	}
@@ -61,11 +64,14 @@ func TestTaskLifecycle(t *testing.T) {
 		t.Fatalf("按标签应查出 2 条，实际 %d", len(filtered))
 	}
 
+	// 两条任务都排在今天、没设截止日期，所以都算今日任务；
+	// 手动「加入今日」只影响今日列表里会不会被钉住，不影响今日统计。
+	// （一条时间都不排的任务不进今日：那是待办池里的存货，见 TestUnscheduledNotInToday）
 	stats, err := repo.GetTaskStats(uid)
 	if err != nil {
 		t.Fatalf("stats: %v", err)
 	}
-	if stats.TodayTotal != 1 || stats.ByCategory["todo"] != 2 {
+	if stats.TodayTotal != 2 || stats.ByCategory["todo"] != 2 {
 		t.Fatalf("统计不对: %+v", stats)
 	}
 	if stats.TodayEstimatedHours != 4 || stats.TodayActualHours != 3 {
@@ -83,20 +89,20 @@ func TestTaskLifecycle(t *testing.T) {
 	if err := repo.ReorderToday(uid, map[int]int{task.ID: 5, second.ID: 1}); err != nil {
 		t.Fatalf("reorder: %v", err)
 	}
-	today, err := repo.GetTasks(uid, model.TaskFilter{TodayOnly: true})
+	todayList, err := repo.GetTasks(uid, model.TaskFilter{TodayOnly: true})
 	if err != nil {
 		t.Fatalf("list today: %v", err)
 	}
-	if len(today) != 2 || today[0].ID != second.ID {
-		t.Fatalf("今日排序不对: %+v", today)
+	if len(todayList) != 2 || todayList[0].ID != second.ID {
+		t.Fatalf("今日排序不对: %+v", todayList)
 	}
 
-	// 移出今日
+	// 移出今日：列表里不再钉着它，但「今天该做」的判定不变，统计照旧
 	if err := repo.SetTaskToday(uid, second.ID, false, 0); err != nil {
 		t.Fatalf("remove today: %v", err)
 	}
-	if stats, _ := repo.GetTaskStats(uid); stats.TodayTotal != 1 {
-		t.Fatalf("移出今日后统计不对: %+v", stats)
+	if stats, _ := repo.GetTaskStats(uid); stats.TodayTotal != 2 {
+		t.Fatalf("移出今日不该改变今日统计: %+v", stats)
 	}
 
 	// 改任务：标签为 nil 表示不动，显式给空数组才清空

@@ -14,6 +14,7 @@ import (
 
 	"github.com/imloama/umore/internal/auth"
 	"github.com/imloama/umore/internal/crypto"
+	"github.com/imloama/umore/internal/model"
 	"github.com/imloama/umore/internal/repository"
 	"github.com/imloama/umore/internal/verification"
 
@@ -268,10 +269,21 @@ func (h *AuthHandler) Me(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"user": user})
 }
 
-// UpdateProfileRequest 个人资料：昵称与头像地址（头像走上传接口拿 URL，这里只存地址）
+// Timezones GET /api/auth/timezones 个人中心下拉用的候选时区（常用那批，不是全量 tzdata）
+func (h *AuthHandler) Timezones(c *gin.Context) {
+	defaultTZ := model.DefaultTimezone
+	c.JSON(http.StatusOK, gin.H{
+		"timezones": model.CommonTimezones(),
+		"default":   defaultTZ,
+	})
+}
+
+// UpdateProfileRequest 个人资料：昵称、头像地址（头像走上传接口拿 URL，这里只存地址）与时区
 type UpdateProfileRequest struct {
 	Nickname string `json:"nickname"`
 	Avatar   string `json:"avatar"`
+	// Timezone 时区名，如 Asia/Shanghai；不传保持原样，传空串也当没传
+	Timezone string `json:"timezone"`
 }
 
 // UpdateProfile PUT /api/auth/profile 改昵称 / 头像。
@@ -305,14 +317,20 @@ func (h *AuthHandler) UpdateProfile(c *gin.Context) {
 	if avatar == "" {
 		avatar = user.Avatar
 	}
+	// 时区影响「今天」从几点开始算，认不出来的值退回默认，不报错卡住保存
+	timezone := model.NormalizeTimezone(strings.TrimSpace(req.Timezone))
+	if strings.TrimSpace(req.Timezone) == "" {
+		timezone = model.NormalizeTimezone(user.Timezone)
+	}
 
-	if err := h.Repo.UpdateProfile(user.ID, nickname, avatar); err != nil {
+	if err := h.Repo.UpdateProfile(user.ID, nickname, avatar, timezone); err != nil {
 		respondError(c, err)
 		return
 	}
 
 	user.Nickname = nickname
 	user.Avatar = avatar
+	user.Timezone = timezone
 	c.JSON(http.StatusOK, gin.H{"user": user})
 }
 

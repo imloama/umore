@@ -21,11 +21,14 @@ type User struct {
 	EmailVerified bool   `gorm:"not null;default:false" json:"email_verified"`
 	Nickname      string `gorm:"size:64" json:"nickname"`
 	// Avatar 头像地址（/uploads/avatars/xxx.png），空着就显示昵称首字母
-	Avatar       string    `gorm:"size:500" json:"avatar"`
-	PasswordHash string    `gorm:"size:128;not null" json:"-"` // 密码哈希，不返回给前端
-	PasswordSalt string    `gorm:"size:64;not null" json:"-"`  // 盐值
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	Avatar       string `gorm:"size:500" json:"avatar"`
+	PasswordHash string `gorm:"size:128;not null" json:"-"` // 密码哈希，不返回给前端
+	PasswordSalt string `gorm:"size:64;not null" json:"-"`  // 盐值
+	// Timezone 时区名（IANA，如 Asia/Shanghai）。「今天」从哪天开始算由它定：
+	// 今日任务、今日统计都按这个时区的 00:00 切，默认 UTC+8。
+	Timezone  string    `gorm:"size:64;not null;default:Asia/Shanghai" json:"timezone"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // Project 项目
@@ -35,24 +38,25 @@ type Project struct {
 	Name        string `gorm:"size:200;not null;uniqueIndex:idx_projects_user_name,priority:2" json:"name"`
 	Description string `gorm:"type:text" json:"description"`
 	GitRepo     string `gorm:"size:500" json:"git_repo"`
-	Customer    string `gorm:"size:200" json:"customer"`                      // 客户
-	Status      string `gorm:"size:20;not null;default:active" json:"status"` // active/archived
+	Customer    string `gorm:"size:200" json:"customer"`                            // 客户
+	Status      string `gorm:"size:20;not null;default:active;index" json:"status"` // active/archived
 	// Amount 合同总金额，改它会产生一条金额变更记录
 	Amount Amount `gorm:"type:numeric(18,2);not null;default:0" json:"amount"`
 
 	// 以下字段只读，实时汇总而来（不在 projects 表里存）
-	TaskCount         int       `gorm:"-" json:"task_count"`
-	EstimatedHours    float64   `gorm:"-" json:"estimated_hours"`
-	ActualHours       float64   `gorm:"-" json:"actual_hours"`
-	Received          Amount    `gorm:"-" json:"received"`                    // 已收款：关联到本项目的收入合计
-	ReceivableCount   int       `gorm:"-" json:"receivable_count"`            // 未收笔数
-	ReceivableAmount  Amount    `gorm:"-" json:"receivable_amount"`           // 未收金额合计
-	ReceivableOverdue Amount    `gorm:"-" json:"receivable_overdue_amount"`   // 其中已逾期的金额
-	NextDueDate       string    `gorm:"-" json:"next_due_date,omitempty"`     // 最近一笔到期日
-	AmountChanges     int       `gorm:"-" json:"amount_change_count"`         // 金额变更次数
-	ChangedAt         string    `gorm:"-" json:"amount_changed_at,omitempty"` // 最近一次金额变更时间
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	TaskCount         int        `gorm:"-" json:"task_count"`
+	EstimatedHours    float64    `gorm:"-" json:"estimated_hours"`
+	ActualHours       float64    `gorm:"-" json:"actual_hours"`
+	Received          Amount     `gorm:"-" json:"received"`                    // 已收款：关联到本项目的收入合计
+	ReceivableCount   int        `gorm:"-" json:"receivable_count"`            // 未收笔数
+	ReceivableAmount  Amount     `gorm:"-" json:"receivable_amount"`           // 未收金额合计
+	ReceivableOverdue Amount     `gorm:"-" json:"receivable_overdue_amount"`   // 其中已逾期的金额
+	NextDueDate       string     `gorm:"-" json:"next_due_date,omitempty"`     // 最近一笔到期日
+	AmountChanges     int        `gorm:"-" json:"amount_change_count"`         // 金额变更次数
+	ChangedAt         string     `gorm:"-" json:"amount_changed_at,omitempty"` // 最近一次金额变更时间
+	ArchivedAt        *time.Time `gorm:"-" json:"archived_at,omitempty"`       // 只读：归档时间，取最近一条归档记录
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
 }
 
 // ProjectAmountChange 项目金额变更记录
@@ -139,27 +143,31 @@ type Idea struct {
 // Task 统一任务（日常待办 / 问题 / 需求 / 商机）
 // Task 与 Issue 合并为同一模型，由 Category 区分；商机额外使用 OpportunityStatus。
 type Task struct {
-	ID                int        `gorm:"primaryKey" json:"id"`
-	UserID            int        `gorm:"index;not null" json:"-"`
-	Number            int        `gorm:"index" json:"number"`
-	Title             string     `gorm:"size:500;not null" json:"title"`
-	Content           string     `gorm:"type:text" json:"content"`
-	Category          string     `gorm:"size:20;not null;default:todo;index" json:"category"` // todo/issue/requirement/opportunity
-	Status            string     `gorm:"size:20;not null;default:TODO;index" json:"status"`   // TODO/DOING/BLOCKED/DONE
-	OpportunityStatus string     `gorm:"size:20" json:"opportunity_status,omitempty"`
-	Priority          string     `gorm:"size:20;not null;default:MEDIUM" json:"priority"` // LOW/MEDIUM/HIGH/URGENT
-	ProjectID         *int       `gorm:"index" json:"project_id,omitempty"`
-	ProjectName       string     `gorm:"-" json:"project_name,omitempty"` // 只读，列表展示用
-	Labels            []Label    `gorm:"many2many:task_labels;" json:"labels"`
-	DueDate           *string    `gorm:"size:10" json:"due_date,omitempty"`
-	ScheduledDate     *string    `gorm:"size:10;index" json:"scheduled_date,omitempty"`
-	EstimatedHours    float64    `gorm:"not null;default:0" json:"estimated_hours"` // 工作量评估（小时），手动填写
-	ActualHours       float64    `gorm:"not null;default:0" json:"actual_hours"`    // 实际用时（小时），手动填写
-	IsToday           bool       `gorm:"not null;default:false;index" json:"is_today"`
-	TodayOrder        *int       `json:"today_order,omitempty"`
-	ClosedAt          *time.Time `json:"closed_at,omitempty"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
+	ID                int     `gorm:"primaryKey" json:"id"`
+	UserID            int     `gorm:"index;not null" json:"-"`
+	Number            int     `gorm:"index" json:"number"`
+	Title             string  `gorm:"size:500;not null" json:"title"`
+	Content           string  `gorm:"type:text" json:"content"`
+	Category          string  `gorm:"size:20;not null;default:todo;index" json:"category"` // todo/issue/requirement/opportunity
+	Status            string  `gorm:"size:20;not null;default:TODO;index" json:"status"`   // TODO/DOING/BLOCKED/DONE
+	OpportunityStatus string  `gorm:"size:20" json:"opportunity_status,omitempty"`
+	Priority          string  `gorm:"size:20;not null;default:MEDIUM" json:"priority"` // LOW/MEDIUM/HIGH/URGENT
+	ProjectID         *int    `gorm:"index" json:"project_id,omitempty"`
+	ProjectName       string  `gorm:"-" json:"project_name,omitempty"` // 只读，列表展示用
+	Labels            []Label `gorm:"many2many:task_labels;" json:"labels"`
+	DueDate           *string `gorm:"size:10" json:"due_date,omitempty"`
+	ScheduledDate     *string `gorm:"size:10;index" json:"scheduled_date,omitempty"`
+	EstimatedHours    float64 `gorm:"not null;default:0" json:"estimated_hours"` // 工作量评估（小时），手动填写
+	ActualHours       float64 `gorm:"not null;default:0" json:"actual_hours"`    // 实际用时（小时），手动填写
+	// IsToday 只表示「手动钉在今日」：一直排进今日列表，直到手动移出。
+	// 它不参与今日统计——今日任务的口径见 TodayFlag（按日期区间算）。
+	IsToday    bool `gorm:"not null;default:false;index" json:"is_today"`
+	TodayOrder *int `json:"today_order,omitempty"`
+	// TodayFlag 只读：这条任务算不算「今日任务」，查询时按用户时区的今天现算，不落库。
+	TodayFlag bool       `gorm:"-" json:"today"`
+	ClosedAt  *time.Time `json:"closed_at,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
 }
 
 // Label 标签
@@ -200,6 +208,20 @@ type Attachment struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
+// ProjectStatusChange 项目状态变更记录（现在只有归档 / 恢复两条路走这里）
+//
+// 「这个项目什么时候被收起来的」得有个地方回答，projects 表只留当前状态，
+// 所以每次状态变化记一条；归档列表里的「归档于 x」取最近一条 to=archived。
+type ProjectStatusChange struct {
+	ID        int `gorm:"primaryKey" json:"id"`
+	UserID    int `gorm:"index;not null" json:"-"`
+	ProjectID int `gorm:"index;not null" json:"project_id"`
+	// 列名落成 from_status / to_status：`to` 是 SQL 保留字，GORM 拼条件时不会替你加引号
+	FromStatus string    `gorm:"size:20;not null" json:"from"`
+	ToStatus   string    `gorm:"size:20;not null" json:"to"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
 // TaskFilter 任务查询条件
 type TaskFilter struct {
 	Category  string
@@ -209,10 +231,16 @@ type TaskFilter struct {
 	Label     string
 	Keyword   string
 	TodayOnly bool
+	// Today 指定「按哪天算今日」，格式 YYYY-MM-DD；留空按用户时区的今天。
+	// 前缀 ! 表示取反（今天不该算进来的），今日页的「已过期 / 未开始」用得上。
+	Today     string
 	Scheduled string
 	// 日期区间（依据 scheduled_date，缺失时回退到 due_date），用于日历视图
 	StartDate string
 	EndDate   string
+	// IncludeArchived 默认不带归档项目下的任务：项目归档就是「这些数据都别再算了」，
+	// 只有想专门翻旧账（按项目筛选、看单个项目）时才把它设成 true
+	IncludeArchived bool
 }
 
 // TaskStats 任务统计
@@ -224,6 +252,10 @@ type TaskStats struct {
 	// 今日工时（小时）：评估合计 / 实际合计，均由用户手动填写
 	TodayEstimatedHours float64 `json:"today_estimated_hours"`
 	TodayActualHours    float64 `json:"today_actual_hours"`
+	// TodayDate 这次统计按哪天算（用户时区的今天），前端拿它显示标题、别用浏览器本地日期
+	TodayDate string `json:"today_date"`
+	// Timezone 这次统计用的时区，设置页改完能立刻看出「现在按哪个时区切天」
+	Timezone string `json:"timezone"`
 }
 
 // All 参与建表迁移的全部表。
@@ -231,7 +263,7 @@ type TaskStats struct {
 func All() []any {
 	return []any{
 		&User{}, &Project{}, &Task{}, &Label{}, &Comment{},
-		&Finance{}, &Receivable{}, &ProjectAmountChange{},
+		&Finance{}, &Receivable{}, &ProjectAmountChange{}, &ProjectStatusChange{},
 		&Idea{}, &Attachment{},
 	}
 }

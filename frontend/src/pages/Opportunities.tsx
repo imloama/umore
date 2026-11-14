@@ -55,8 +55,9 @@ export default function Opportunities() {
 
   const loadAll = async () => {
     const [tasks, projectList] = await Promise.all([
+      // 看板只跟「在做的」项目打交道：归档项目的商机不再占着列
       taskApi.list({ category: 'opportunity' }),
-      projectApi.list()
+      projectApi.list('active')
     ])
     setItems(tasks || [])
     setProjects(projectList || [])

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Camera, CheckCircle2, Languages as LanguagesIcon, LockKeyhole, Mail, UserRound } from 'lucide-react'
+import { Camera, CheckCircle2, Clock, Languages as LanguagesIcon, LockKeyhole, Mail, UserRound } from 'lucide-react'
 import { authApi, currentUser, errorCodeOf, storeUser } from '../services/api'
 import type { AuthUser } from '../types'
 import { LOCALE_LABEL, SUPPORTED_LOCALES, useI18n } from '@/i18n'
@@ -9,7 +9,10 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Select } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
+
+const DEFAULT_TIMEZONE = 'Asia/Shanghai'
 
 export default function Profile() {
   const { t, te, locale, setLocale } = useI18n()
@@ -19,6 +22,12 @@ export default function Profile() {
   const [profileErr, setProfileErr] = useState('')
   const [savingProfile, setSavingProfile] = useState(false)
   const [uploading, setUploading] = useState(false)
+
+  // 时区：影响「今日」从几点开始算。候选项从后端拿（常用那批 IANA 名），当前值不在列表里也照样能显示
+  const [timezone, setTimezone] = useState(currentUser()?.timezone || DEFAULT_TIMEZONE)
+  const [timezoneOptions, setTimezoneOptions] = useState<string[]>([DEFAULT_TIMEZONE])
+  const [timezoneMsg, setTimezoneMsg] = useState('')
+  const [savingTimezone, setSavingTimezone] = useState(false)
 
   const [oldPassword, setOldPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -36,8 +45,13 @@ export default function Profile() {
       .then(res => {
         setUser(res.user)
         setNickname(res.user.nickname || '')
+        setTimezone(res.user.timezone || DEFAULT_TIMEZONE)
         storeUser(res.user)
       })
+      .catch(() => undefined)
+    authApi
+      .timezones()
+      .then(res => setTimezoneOptions(res.timezones?.length ? res.timezones : [DEFAULT_TIMEZONE]))
       .catch(() => undefined)
   }, [])
 
@@ -81,6 +95,25 @@ export default function Profile() {
     } finally {
       setUploading(false)
       if (fileRef.current) fileRef.current.value = ''
+    }
+  }
+
+  const saveTimezone = async (next: string) => {
+    const previous = timezone
+    setTimezone(next)
+    setTimezoneMsg('')
+    setSavingTimezone(true)
+    try {
+      const res = await authApi.updateProfile({ timezone: next })
+      setUser(res.user)
+      setTimezone(res.user.timezone || DEFAULT_TIMEZONE)
+      storeUser(res.user)
+      setTimezoneMsg(t('profile.timezoneSaved'))
+    } catch {
+      setTimezone(previous)
+      setTimezoneMsg(t('common.saveFailed'))
+    } finally {
+      setSavingTimezone(false)
     }
   }
 
@@ -231,6 +264,34 @@ export default function Profile() {
             {savingPwd ? t('common.saving') : t('profile.updatePassword')}
           </Button>
         </form>
+      </Card>
+
+      {/* 时区存数据库：换设备也要按同一套「今天」算，不然同一批任务的统计会飘 */}
+      <Card className="mt-4 p-5">
+        <div className="mb-3 flex items-center gap-1.5 text-[13px] font-semibold">
+          <Clock className="size-4 text-muted-foreground" />
+          {t('profile.timezone')}
+        </div>
+        <Select
+          value={timezone}
+          disabled={savingTimezone}
+          onChange={e => saveTimezone(e.target.value)}
+        >
+          {!timezoneOptions.includes(timezone) && <option value={timezone}>{timezone}</option>}
+          {timezoneOptions.map(name => (
+            <option key={name} value={name}>
+              {name}
+              {name === DEFAULT_TIMEZONE ? ` · ${t('profile.timezoneDefault')}` : ''}
+            </option>
+          ))}
+        </Select>
+        <p className="mt-2 text-[11px] text-muted-foreground">{t('profile.timezoneHint')}</p>
+        {timezoneMsg && (
+          <div className="mt-2 flex items-center gap-1.5 text-[12px] text-emerald-700">
+            <CheckCircle2 className="size-3.5" />
+            {timezoneMsg}
+          </div>
+        )}
       </Card>
 
       {/* 语言只存在这台浏览器上：换设备/换浏览器各记一份，不写数据库 */}

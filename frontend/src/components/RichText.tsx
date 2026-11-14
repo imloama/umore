@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { Download, FileText } from 'lucide-react'
 import { useI18n } from '@/i18n'
 import { attachmentImageUrl, loadAttachmentImage } from '../services/api'
+import { openImageLightbox } from './ImageLightbox'
 
 // 轻量 Markdown 渲染：与后端 model.RenderMarkdown 语法保持一致。
 // 前端自行渲染是为了编辑时实时预览，无需往返请求。
@@ -174,6 +175,23 @@ export default function RichText({ source, className = '' }: { source: string; c
     }
   }, [authImages, html])
 
+  // 点图看大图：从被点的那张所在作用域收集图片，一次把整单的图都带上，方便左右翻。
+  // 作用域上限是最近一个 [data-image-gallery]（任务详情 / 项目记录会标），
+  // 没标就只在当前这段富文本里翻。
+  const openImage = (event: ReactMouseEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement
+    if (target.tagName !== 'IMG') return
+    const img = target as HTMLImageElement
+    if (!img.src) return
+    const scope = container.current?.closest('[data-image-gallery]') ?? container.current
+    const images = Array.from(scope?.querySelectorAll('img') ?? []).filter(el => !!el.src) as HTMLImageElement[]
+    const at = images.indexOf(img)
+    openImageLightbox(
+      images.map(el => ({ src: el.src, alt: el.alt })),
+      at >= 0 ? at : 0
+    )
+  }
+
   // 附件卡片在渲染后按占位切片插入：用真实组件而不是 innerHTML，
   // 这样图标、下载链接、无障碍标签都能跟着语言走。
   const parts: { html?: string; url?: string; label?: string }[] = []
@@ -188,11 +206,18 @@ export default function RichText({ source, className = '' }: { source: string; c
   if (last < html.length) parts.push({ html: html.slice(last) })
 
   if (parts.length === 1 && parts[0].html !== undefined) {
-    return <div ref={container} className={`rich-text ${className}`} dangerouslySetInnerHTML={{ __html: html }} />
+    return (
+      <div
+        ref={container}
+        onClick={openImage}
+        className={`rich-text ${className}`}
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+    )
   }
 
   return (
-    <div ref={container} className={`rich-text ${className}`}>
+    <div ref={container} onClick={openImage} className={`rich-text ${className}`}>
       {parts.map((part, index) =>
         part.html !== undefined ? (
           <span key={index} dangerouslySetInnerHTML={{ __html: part.html }} />

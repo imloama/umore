@@ -1,6 +1,19 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { CalendarClock, Coins, FolderKanban, Pencil, Plus, ScrollText, Search, Timer, Trash, Wallet } from 'lucide-react'
+import {
+  Archive,
+  ArchiveRestore,
+  CalendarClock,
+  Coins,
+  FolderKanban,
+  Pencil,
+  Plus,
+  ScrollText,
+  Search,
+  Timer,
+  Trash,
+  Wallet
+} from 'lucide-react'
 import { errorCodeOf, projectApi } from '../services/api'
 import type { Project } from '../types'
 import { useI18n } from '@/i18n'
@@ -12,7 +25,6 @@ import { Card } from '@/components/ui/card'
 import { Dialog } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Select } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
@@ -34,7 +46,8 @@ export default function Projects() {
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState<Partial<Project>>(emptyForm())
   const [keyword, setKeyword] = useState('')
-  const [showArchived, setShowArchived] = useState(false)
+  // 归档是独立的查询入口：默认只看在做的项目，切到归档只回归档的
+  const [view, setView] = useState<'active' | 'archived'>('active')
   const [detail, setDetail] = useState<Project | null>(null)
   const [detailTab, setDetailTab] = useState('overview')
   // 编辑金额时顺手填变更说明，后端会落一条金额变更记录
@@ -113,7 +126,7 @@ export default function Projects() {
     const kw = keyword.trim().toLowerCase()
     return projects
       .filter(p => {
-        if (!showArchived && p.status === 'archived') return false
+        if ((p.status === 'archived') !== (view === 'archived')) return false
         if (!kw) return true
         return `${p.name} ${p.customer || ''} ${p.description || ''}`.toLowerCase().includes(kw)
       })
@@ -123,7 +136,7 @@ export default function Projects() {
         if (gap !== 0) return gap
         return (b.updated_at || '').localeCompare(a.updated_at || '')
       })
-  }, [projects, keyword, showArchived])
+  }, [projects, keyword, view])
 
   const totalHours = filtered.reduce((s, p) => s + (p.actual_hours || 0), 0)
   const totalTasks = filtered.reduce((s, p) => s + (p.task_count || 0), 0)
@@ -134,6 +147,19 @@ export default function Projects() {
   // 未收是所有项目各自「合同 - 已收」的和：某个项目收多了不拿去抵另一个项目的欠款
   const totalUnpaid = sumAmounts(filtered.map(p => Math.max(0, (p.amount || 0) - (p.received || 0))))
   const archivedCount = projects.filter(p => p.status === 'archived').length
+  const activeCount = projects.length - archivedCount
+
+  const toggleArchive = async (project: Project) => {
+    const archived = project.status !== 'archived'
+    if (archived && !confirm(t('project.confirmArchive', { name: project.name }))) return
+    try {
+      await projectApi.setArchived(project.id!, archived)
+      setDetail(prev => (prev && prev.id === project.id ? { ...prev, status: archived ? 'archived' : 'active' } : prev))
+      loadProjects()
+    } catch (error) {
+      console.error('Failed to archive project:', error)
+    }
+  }
 
   return (
     <div>
@@ -143,11 +169,30 @@ export default function Projects() {
         description={t('project.description')}
         actions={
           <>
-            {archivedCount > 0 && (
-              <Button variant="outline" size="sm" onClick={() => setShowArchived(v => !v)}>
-                {showArchived ? t('project.hideArchived') : t('project.showArchived', { n: archivedCount })}
-              </Button>
-            )}
+            {/* 归档入口：切过去只看归档项目，数据在这儿留底，不再进日常视图 */}
+            <div className="flex items-center gap-1 rounded-md border border-border bg-secondary/40 p-0.5">
+              <button
+                type="button"
+                onClick={() => setView('active')}
+                className={cn(
+                  'rounded px-2.5 py-1 text-[12px] transition-colors',
+                  view === 'active' ? 'bg-card font-medium shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                {t('project.tab.active', { n: activeCount })}
+              </button>
+              <button
+                type="button"
+                onClick={() => setView('archived')}
+                className={cn(
+                  'flex items-center gap-1 rounded px-2.5 py-1 text-[12px] transition-colors',
+                  view === 'archived' ? 'bg-card font-medium shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                <Archive className="size-3.5" />
+                {t('project.tab.archived', { n: archivedCount })}
+              </button>
+            </div>
             <Button onClick={() => { setForm(emptyForm()); setShowForm(true) }}>
               <Plus />
               {t('project.new')}
@@ -216,8 +261,12 @@ export default function Projects() {
       {filtered.length === 0 ? (
         <Card className="flex flex-col items-center justify-center gap-2 px-6 py-14 text-center">
           <FolderKanban className="size-6 text-muted-foreground/60" />
-          <div className="text-sm font-medium">{t('project.empty')}</div>
-          <div className="text-xs text-muted-foreground">{t('project.emptyHint')}</div>
+          <div className="text-sm font-medium">
+            {view === 'archived' ? t('project.emptyArchived') : t('project.empty')}
+          </div>
+          <div className="text-xs text-muted-foreground">
+            {view === 'archived' ? t('project.emptyArchivedHint') : t('project.emptyHint')}
+          </div>
         </Card>
       ) : (
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -246,9 +295,20 @@ export default function Projects() {
                     </div>
                     <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
                       {project.customer || t('project.noCustomer')}
+                      {project.status === 'archived' && project.archived_at && (
+                        <span className="ml-1">· {t('project.archivedAt', { date: project.archived_at.slice(0, 10) })}</span>
+                      )}
                     </div>
                   </div>
                   <div className="flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      onClick={() => toggleArchive(project)}
+                      title={project.status === 'archived' ? t('project.restore') : t('project.archive')}
+                    >
+                      {project.status === 'archived' ? <ArchiveRestore /> : <Archive />}
+                    </Button>
                     <Button variant="ghost" size="icon-sm" onClick={() => edit(project)} title={t('common.edit')}>
                       <Pencil />
                     </Button>
@@ -424,10 +484,12 @@ export default function Projects() {
             </div>
             <div>
               <Label>{t('project.field.status')}</Label>
-              <Select value={form.status} onChange={e => setForm({ ...form, status: e.target.value as Project['status'] })}>
-                <option value="active">{t('project.status.active')}</option>
-                <option value="archived">{t('project.status.archived')}</option>
-              </Select>
+              {/* 状态不跟着表单走：归档 / 恢复在卡片上一点就好，免得存表单时把归档状态改回去 */}
+              <div className="flex h-9 items-center gap-1.5 rounded-md border border-input bg-secondary/40 px-2.5 text-[12px] text-muted-foreground">
+                {form.status === 'archived' ? <Archive className="size-3.5" /> : <FolderKanban className="size-3.5" />}
+                {form.status === 'archived' ? t('project.status.archived') : t('project.status.active')}
+                <span className="ml-auto text-[11px]">{t('project.status.hint')}</span>
+              </div>
             </div>
           </div>
           <div>

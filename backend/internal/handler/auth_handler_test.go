@@ -379,6 +379,30 @@ func TestUpdateProfile(t *testing.T) {
 		t.Fatalf("空昵称不该覆盖原值: %q", user.Nickname)
 	}
 
+	// 时区跟着一起改；认不出来的值退回默认 UTC+8，不拦着保存
+	payload, _ = json.Marshal(gin.H{"timezone": "Asia/Tokyo"})
+	req = httptest.NewRequest(http.MethodPut, "/api/auth/profile", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if user, _ := h.Repo.GetUserByEmail("max@example.com"); user.Timezone != "Asia/Tokyo" {
+		t.Fatalf("时区没改上: %q", user.Timezone)
+	}
+	if user, _ := h.Repo.GetUserByEmail("max@example.com"); user.Nickname != "老马" {
+		t.Fatalf("只传时区不该把昵称改掉: %q", user.Nickname)
+	}
+
+	payload, _ = json.Marshal(gin.H{"timezone": "Mars/Olympus"})
+	req = httptest.NewRequest(http.MethodPut, "/api/auth/profile", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if user, _ := h.Repo.GetUserByEmail("max@example.com"); user.Timezone != "Asia/Shanghai" {
+		t.Fatalf("非法时区应退回 Asia/Shanghai，实际 %q", user.Timezone)
+	}
+
 	// 没 token 一律 401
 	req = httptest.NewRequest(http.MethodPut, "/api/auth/profile", bytes.NewReader([]byte(`{"nickname":"x"}`)))
 	req.Header.Set("Content-Type", "application/json")

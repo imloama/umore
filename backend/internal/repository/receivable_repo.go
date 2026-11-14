@@ -31,13 +31,19 @@ func fillReceivableTiming(item *model.Receivable) {
 }
 
 // GetReceivables 收款计划列表。status 为空时返回全部；pending 单按到期日升序（没填到期日的垫后）。
-func (r *Repository) GetReceivables(userID int, status string, projectID int) ([]model.Receivable, error) {
+//
+// 归档项目下的收款计划默认不出现（回款页别再催旧账）；按项目筛时照给，
+// includeArchived 打开也照给——翻旧账总得看得见。
+func (r *Repository) GetReceivables(userID int, status string, projectID int, includeArchived bool) ([]model.Receivable, error) {
 	query := r.db.Where("user_id = ?", userID)
 	if status != "" {
 		query = query.Where("status = ?", status)
 	}
 	if projectID > 0 {
 		query = query.Where("project_id = ?", projectID)
+	} else if !includeArchived {
+		cond, args := r.notArchivedProjectID(userID, "receivables")
+		query = query.Where(cond, args...)
 	}
 	// 排序：先「未收」，未收里把没填到期日的垫后，其余按到期日升序
 	query = query.Order("CASE WHEN status = 'pending' THEN 0 ELSE 1 END").
@@ -226,7 +232,7 @@ func (r *Repository) DeleteReceivable(userID, id int) error {
 // GetReceivableSummary 顶部三格：未收 / 逾期 / 7 天内到期，外加已收合计。
 // 逾期与剩余天数是 Go 侧算的（见 fillReceivableTiming），这里只做朴素累加。
 func (r *Repository) GetReceivableSummary(userID int) (*model.ReceivableSummary, error) {
-	list, err := r.GetReceivables(userID, "", 0)
+	list, err := r.GetReceivables(userID, "", 0, false)
 	if err != nil {
 		return nil, err
 	}

@@ -28,7 +28,7 @@ func TestProjectHoursSummary(t *testing.T) {
 		}
 	}
 
-	list, err := repo.GetProjects(uid)
+	list, err := repo.GetProjects(uid, "")
 	if err != nil {
 		t.Fatalf("list projects: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestProjectHoursSummary(t *testing.T) {
 	if err := repo.CreateProject(uid, empty); err != nil {
 		t.Fatalf("create empty project: %v", err)
 	}
-	list, _ = repo.GetProjects(uid)
+	list, _ = repo.GetProjects(uid, "")
 	var blank *model.Project
 	for i := range list {
 		if list[i].ID == empty.ID {
@@ -111,9 +111,9 @@ func TestProjectAmountChangeTracking(t *testing.T) {
 		t.Fatalf("want 1 change, got %d", len(changes))
 	}
 	first := changes[0]
-	if !first.OldAmount.Equal(model.Money("50000").Decimal) ||
-		!first.NewAmount.Equal(model.Money("62000").Decimal) ||
-		!first.Delta.Equal(model.Money("12000").Decimal) {
+	if !first.OldAmount.Equal(model.Money("50000")) ||
+		!first.NewAmount.Equal(model.Money("62000")) ||
+		!first.Delta.Equal(model.Money("12000")) {
 		t.Fatalf("变更金额不对: %+v", first)
 	}
 	if first.Reason != "客户加了一个拼团模块" {
@@ -125,12 +125,12 @@ func TestProjectAmountChangeTracking(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add amount change: %v", err)
 	}
-	if !change.Delta.Equal(model.Money("-4000").Decimal) {
+	if !change.Delta.Equal(model.Money("-4000")) {
 		t.Fatalf("追加变更算错: %+v", change)
 	}
 
 	got, _ := repo.GetProject(uid, pid)
-	if !got.Amount.Equal(model.Money("58000").Decimal) {
+	if !got.Amount.Equal(model.Money("58000")) {
 		t.Fatalf("项目总金额没跟着变: %s", got.Amount)
 	}
 	if got.AmountChanges != 2 || got.ChangedAt == "" {
@@ -144,7 +144,7 @@ func TestProjectAmountChangeTracking(t *testing.T) {
 	if after.AmountChanges != 1 {
 		t.Fatalf("删记录后次数不对: %d", after.AmountChanges)
 	}
-	if !after.Amount.Equal(model.Money("58000").Decimal) {
+	if !after.Amount.Equal(model.Money("58000")) {
 		t.Fatal("删变更记录不该回滚项目当前金额")
 	}
 }
@@ -180,13 +180,13 @@ func TestProjectReceivedSummary(t *testing.T) {
 	}
 
 	got, _ := repo.GetProject(uid, pid)
-	if !got.Received.Equal(model.Money("15000").Decimal) {
+	if !got.Received.Equal(model.Money("15000")) {
 		t.Fatalf("收款汇总不对: %s (want 15000)", got.Received)
 	}
 
-	list, _ := repo.GetProjects(uid)
+	list, _ := repo.GetProjects(uid, "")
 	for _, p := range list {
-		if p.ID == other.ID && !p.Received.Equal(model.Money("1000").Decimal) {
+		if p.ID == other.ID && !p.Received.Equal(model.Money("1000")) {
 			t.Fatalf("另一个项目收款不对: %s", p.Received)
 		}
 	}
@@ -213,14 +213,14 @@ func TestFinanceSummary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("summary: %v", err)
 	}
-	if !sum.TotalIncome.Equal(model.Money("1000.3").Decimal) {
+	if !sum.TotalIncome.Equal(model.Money("1000.3")) {
 		t.Fatalf("收入汇总不对: %s", sum.TotalIncome)
 	}
-	if !sum.TotalExpense.Equal(model.Money("300.05").Decimal) {
+	if !sum.TotalExpense.Equal(model.Money("300.05")) {
 		t.Fatalf("支出汇总不对: %s", sum.TotalExpense)
 	}
 	// 0.1 + 0.2 这类小数累加用 decimal 才不出误差
-	if !sum.Balance.Equal(model.Money("700.25").Decimal) {
+	if !sum.Balance.Equal(model.Money("700.25")) {
 		t.Fatalf("结余不对: %s", sum.Balance)
 	}
 }
@@ -253,7 +253,7 @@ func TestDeleteProjectKeepsRelatedRecords(t *testing.T) {
 	if got.ProjectID != nil {
 		t.Fatalf("项目的关联应被置空: %v", *got.ProjectID)
 	}
-	items, _ := repo.GetReceivables(uid, "", 0)
+	items, _ := repo.GetReceivables(uid, "", 0, false)
 	if len(items) != 1 || items[0].ProjectID != nil {
 		t.Fatalf("收款计划应保留并解除关联: %+v", items)
 	}
@@ -304,5 +304,169 @@ func TestLabelNameConflict(t *testing.T) {
 	second.Name = "紧急"
 	if err := repo.UpdateLabel(uid, second); err != ErrLabelNameTaken {
 		t.Fatalf("改成重名应返回 ErrLabelNameTaken，实际 %v", err)
+	}
+}
+
+// 归档：状态能切、归档时间能取、重复归档不留多条记录，
+// 且归档后这个项目的任务 / 待收款从日常视图里消失，恢复后又回来。
+func TestProjectArchiving(t *testing.T) {
+	eachRepo(t, func(t *testing.T, repo *Repository) {
+		uid := newUser(t, repo, "archive@example.com")
+
+		old := &model.Project{Name: "旧单子", Status: "active", Amount: model.Money("1000")}
+		fresh := &model.Project{Name: "在做的单子", Status: "active"}
+		for _, p := range []*model.Project{old, fresh} {
+			if err := repo.CreateProject(uid, p); err != nil {
+				t.Fatalf("create project: %v", err)
+			}
+			if p.Status != ProjectStatusActive {
+				t.Fatalf("新建项目应是活跃: %s", p.Status)
+			}
+		}
+
+		oldID := old.ID
+		for _, task := range []*model.Task{
+			{Title: "旧单子的活", Category: "todo", ProjectID: &oldID},
+			{Title: "新单子的活", Category: "todo", ProjectID: &fresh.ID},
+			{Title: "没挂项目的活", Category: "todo"},
+		} {
+			if err := repo.CreateTask(uid, task); err != nil {
+				t.Fatalf("create task: %v", err)
+			}
+		}
+		if err := repo.CreateReceivable(uid, &model.Receivable{Title: "旧单尾款",
+			Amount: model.Money("500"), ProjectID: &oldID}); err != nil {
+			t.Fatalf("create receivable: %v", err)
+		}
+
+		archived, err := repo.SetProjectArchived(uid, oldID, true)
+		if err != nil {
+			t.Fatalf("archive project: %v", err)
+		}
+		if archived == nil || archived.Status != ProjectStatusArchived || archived.ArchivedAt == nil {
+			t.Fatalf("归档后状态/时间不对: %+v", archived)
+		}
+
+		// 重复归档不再写记录
+		if _, err := repo.SetProjectArchived(uid, oldID, true); err != nil {
+			t.Fatalf("archive twice: %v", err)
+		}
+		changes, _ := repo.GetProjectStatusChanges(uid, oldID)
+		if len(changes) != 1 || changes[0].FromStatus != ProjectStatusActive || changes[0].ToStatus != ProjectStatusArchived {
+			t.Fatalf("状态变更记录不对: %+v", changes)
+		}
+
+		// 列表按状态筛：全部里两个都在，active 只剩一个，archived 只有它
+		if list, _ := repo.GetProjects(uid, ""); len(list) != 2 {
+			t.Fatalf("全部项目应有 2 个: %+v", list)
+		}
+		actives, _ := repo.GetProjects(uid, ProjectStatusActive)
+		if len(actives) != 1 || actives[0].ID != fresh.ID {
+			t.Fatalf("活跃列表不对: %+v", actives)
+		}
+		archives, _ := repo.GetProjects(uid, ProjectStatusArchived)
+		if len(archives) != 1 || archives[0].ID != oldID || archives[0].ArchivedAt == nil {
+			t.Fatalf("归档列表不对: %+v", archives)
+		}
+
+		// 归档项目的任务从默认视图里消失，只剩没挂项目的那条
+		tasks, _ := repo.GetTasks(uid, model.TaskFilter{})
+		if len(tasks) != 2 {
+			t.Fatalf("归档后默认任务列表该剩 2 条: %+v", tasks)
+		}
+		for _, task := range tasks {
+			if task.ProjectID != nil && *task.ProjectID == oldID {
+				t.Fatalf("归档项目的任务不该出现: %+v", task)
+			}
+		}
+		if all, _ := repo.GetTasks(uid, model.TaskFilter{IncludeArchived: true}); len(all) != 3 {
+			t.Fatalf("include_archived 时应 3 条: %+v", all)
+		}
+		// 明确按项目筛就照给：看单个项目的历史要用
+		if own, _ := repo.GetTasks(uid, model.TaskFilter{ProjectID: &oldID}); len(own) != 1 {
+			t.Fatalf("按项目筛应拿到 1 条: %+v", own)
+		}
+
+		// 统计也不该被归档项目的任务撑着
+		stats, err := repo.GetTaskStats(uid)
+		if err != nil {
+			t.Fatalf("stats: %v", err)
+		}
+		if stats.ByCategory["todo"] != 2 {
+			t.Fatalf("统计应只算 2 条未归档任务: %+v", stats.ByCategory)
+		}
+
+		// 待收款同理：默认视图不催归档项目的账，汇总也不算
+		if list, _ := repo.GetReceivables(uid, "", 0, false); len(list) != 0 {
+			t.Fatalf("归档项目的待收款不该出现: %+v", list)
+		}
+		if list, _ := repo.GetReceivables(uid, "", 0, true); len(list) != 1 {
+			t.Fatalf("include_archived 时应 1 笔: %+v", list)
+		}
+		if sum, _ := repo.GetReceivableSummary(uid); sum.PendingCount != 0 {
+			t.Fatalf("归档项目的待收款不该进汇总: %+v", sum)
+		}
+
+		// 恢复：任务与待收款回来，状态变更记第二条
+		restored, err := repo.SetProjectArchived(uid, oldID, false)
+		if err != nil {
+			t.Fatalf("restore project: %v", err)
+		}
+		if restored == nil || restored.Status != ProjectStatusActive || restored.ArchivedAt != nil {
+			t.Fatalf("恢复后状态不对: %+v", restored)
+		}
+		if tasks, _ := repo.GetTasks(uid, model.TaskFilter{}); len(tasks) != 3 {
+			t.Fatalf("恢复后任务应回到 3 条: %+v", tasks)
+		}
+		if list, _ := repo.GetReceivables(uid, "", 0, false); len(list) != 1 {
+			t.Fatalf("恢复后待收款应回来: %+v", list)
+		}
+		if changes, _ := repo.GetProjectStatusChanges(uid, oldID); len(changes) != 2 {
+			t.Fatalf("恢复也该记一条: %+v", changes)
+		}
+	})
+}
+
+// 编辑项目不再能改状态：归档 / 恢复只走 SetProjectArchived，
+// 免得旧表单提交一遍就把归档状态改回去。
+func TestUpdateProjectKeepsStatus(t *testing.T) {
+	repo := newTestRepo(t)
+	uid := newUser(t, repo, "keep@example.com")
+
+	project := &model.Project{Name: "要归档的单子", Status: "active"}
+	if err := repo.CreateProject(uid, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if _, err := repo.SetProjectArchived(uid, project.ID, true); err != nil {
+		t.Fatalf("archive project: %v", err)
+	}
+
+	edited := *project
+	edited.Name = "改了名字"
+	edited.Status = ProjectStatusActive
+	if err := repo.UpdateProject(uid, &edited, ""); err != nil {
+		t.Fatalf("update project: %v", err)
+	}
+	got, _ := repo.GetProject(uid, project.ID)
+	if got.Name != "改了名字" || got.Status != ProjectStatusArchived {
+		t.Fatalf("改名生效但状态该保持归档: %+v", got)
+	}
+}
+
+// 归档是本人的事：别人归档不了我的项目
+func TestArchiveProjectIsolation(t *testing.T) {
+	repo := newTestRepo(t)
+	alice := newUser(t, repo, "alice-archive@example.com")
+	bob := newUser(t, repo, "bob-archive@example.com")
+
+	project := &model.Project{Name: "Alice 的单", Status: "active"}
+	if err := repo.CreateProject(alice, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if _, err := repo.SetProjectArchived(bob, project.ID, true); err == nil {
+		t.Fatal("B 归档 A 的项目该报 not found")
+	}
+	if again, _ := repo.GetProject(alice, project.ID); again == nil || again.Status != ProjectStatusActive {
+		t.Fatalf("A 的项目被动了: %+v", again)
 	}
 }

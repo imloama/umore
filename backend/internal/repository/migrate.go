@@ -19,6 +19,10 @@ func (r *Repository) Migrate() error {
 	if err := r.BackfillNicknames(); err != nil {
 		return fmt.Errorf("backfill nickname: %w", err)
 	}
+	// 时区是后加的字段：老账号补成默认 UTC+8，「今天」的口径不能有空值这一种
+	if err := r.BackfillTimezones(); err != nil {
+		return fmt.Errorf("backfill timezone: %w", err)
+	}
 	if err := r.BackfillReceivableIncome(); err != nil {
 		return fmt.Errorf("backfill receivable income: %w", err)
 	}

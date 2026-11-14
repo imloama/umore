@@ -13,7 +13,7 @@ type TaskHandler struct {
 	Handler
 }
 
-// GetAll GET /api/tasks?category=&status=&priority=&project_id=&label=&keyword=&today=1&date=
+// GetAll GET /api/tasks?category=&status=&priority=&project_id=&label=&keyword=&today=1&date=&include_archived=1
 func (h *TaskHandler) GetAll(c *gin.Context) {
 	filter := model.TaskFilter{
 		Category:  c.Query("category"),
@@ -22,9 +22,13 @@ func (h *TaskHandler) GetAll(c *gin.Context) {
 		Label:     c.Query("label"),
 		Keyword:   c.Query("keyword"),
 		TodayOnly: c.Query("today") == "1" || c.Query("today") == "true",
+		// today=forget：今日页的「已过期 / 未开始」两栏，同一个口径取反
+		Today:     c.Query("today_date"),
 		Scheduled: c.Query("date"),
 		StartDate: c.Query("start_date"),
 		EndDate:   c.Query("end_date"),
+		// 归档项目下的任务默认不出现，显式带 include_archived 才查
+		IncludeArchived: c.Query("include_archived") == "1" || c.Query("include_archived") == "true",
 	}
 	if idStr := c.Query("project_id"); idStr != "" {
 		id, err := strconv.Atoi(idStr)
@@ -137,6 +141,15 @@ func (h *TaskHandler) Delete(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
+}
+
+// Today GET /api/tasks/today 用户时区里的今天：日期 + 时区。
+// 前端别拿浏览器的 new Date() 算今天，那跟用户设置的时区可能差一天。
+func (h *TaskHandler) Today(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"today":    h.Repo.TodayFor(userID(c)),
+		"timezone": h.Repo.TimezoneFor(userID(c)),
+	})
 }
 
 // SetToday POST /api/tasks/:id/today {is_today: true}

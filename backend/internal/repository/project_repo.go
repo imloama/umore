@@ -2,6 +2,7 @@ package repository
 
 import (
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/imloama/umore/internal/model"
@@ -14,13 +15,25 @@ func todayString() string {
 	return time.Now().Format("2006-01-02")
 }
 
+// 项目状态：活跃 / 已归档。归档的项目不再算进任务、看板、统计与回款，
+// 只是留个归档入口专门翻。
+const (
+	ProjectStatusActive   = "active"
+	ProjectStatusArchived = "archived"
+)
+
 // GetProjects 项目列表，带上任务工时、收款、金额变更、待收款四组汇总量。
+// status 为空时全给（归档 tab 之外的「全部」）；给 archived 就只回归档的。
 //
 // 汇总不用一条巨型 JOIN：先查项目，再按 project_id 分组各查一次，
 // 有 N 个项目也只是固定几条 SQL，且不用为 SQLite / Postgres 的聚合类型差异操心。
-func (r *Repository) GetProjects(userID int) ([]model.Project, error) {
+func (r *Repository) GetProjects(userID int, status string) ([]model.Project, error) {
+	query := r.db.Where("user_id = ?", userID)
+	if s := strings.TrimSpace(status); s != "" {
+		query = query.Where("status = ?", s)
+	}
 	var projects []model.Project
-	if err := r.db.Where("user_id = ?", userID).Order("updated_at DESC").Find(&projects).Error; err != nil {
+	if err := query.Order("updated_at DESC").Find(&projects).Error; err != nil {
 		return nil, err
 	}
 	if err := r.fillProjectSummaries(userID, projects); err != nil {
@@ -137,6 +150,34 @@ func (r *Repository) fillProjectSummaries(userID int, projects []model.Project) 
 		return err
 	}
 
+	// 归档时间：取每个项目最近一条「→ archived」的状态变更
+	type archiveRow struct {
+		ProjectID int
+		LatestID  int
+	}
+	var archives []archiveRow
+	if err := r.db.Model(&model.ProjectStatusChange{}).
+		Where("user_id = ? AND project_id IN ? AND to_status = ?", userID, ids, ProjectStatusArchived).
+		Select("project_id, MAX(id) AS latest_id").
+		Group("project_id").Scan(&archives).Error; err != nil {
+		return err
+	}
+	archiveIDs := make([]int, 0, len(archives))
+	for _, a := range archives {
+		archiveIDs = append(archiveIDs, a.LatestID)
+	}
+	archivedAt := map[int]time.Time{}
+	if len(archiveIDs) > 0 {
+		var rows []model.ProjectStatusChange
+		if err := r.db.Select("id", "project_id", "created_at").Where("id IN ?", archiveIDs).
+			Find(&rows).Error; err != nil {
+			return err
+		}
+		for _, row := range rows {
+			archivedAt[row.ProjectID] = row.CreatedAt
+		}
+	}
+
 	hoursBy := map[int]hoursRow{}
 	for _, h := range hours {
 		hoursBy[h.ProjectID] = h
@@ -171,6 +212,13 @@ func (r *Repository) fillProjectSummaries(userID int, projects []model.Project) 
 				p.ChangedAt = at.Format(time.RFC3339)
 			}
 		}
+		if p.Status == ProjectStatusArchived {
+			if at, ok := archivedAt[p.ID]; ok {
+				// 每个项目拷一份，别让列表里所有项目共用一个时间指针
+				stamp := at
+				p.ArchivedAt = &stamp
+			}
+		}
 		if x, ok := receivableBy[p.ID]; ok {
 			p.ReceivableCount = x.Count
 			p.ReceivableAmount = x.Total.Normalize()
@@ -185,9 +233,7 @@ func (r *Repository) fillProjectSummaries(userID int, projects []model.Project) 
 
 // CreateProject 建项目
 func (r *Repository) CreateProject(userID int, p *model.Project) error {
-	if p.Status == "" {
-		p.Status = "active"
-	}
+	p.Status = normalizeProjectStatus(p.Status)
 	p.UserID = userID
 	p.ID = 0
 	if err := r.db.Create(p).Error; err != nil {
@@ -211,11 +257,10 @@ func (r *Repository) UpdateProject(userID int, p *model.Project, reason string) 
 			return err
 		}
 
-		if p.Status == "" {
-			p.Status = "active"
-		}
+		// 状态不走这里：归档 / 恢复只认 SetProjectArchived，
+		// 否则随手提交一个旧表单就能把归档状态改回去，还漏掉状态变更记录。
 		if err := tx.Model(&model.Project{}).Where("user_id = ? AND id = ?", userID, p.ID).
-			Select("name", "description", "git_repo", "customer", "status", "amount").
+			Select("name", "description", "git_repo", "customer", "amount").
 			Updates(p).Error; err != nil {
 			if isDuplicate(err) {
 				return ErrProjectNameTaken
@@ -223,7 +268,7 @@ func (r *Repository) UpdateProject(userID int, p *model.Project, reason string) 
 			return err
 		}
 
-		if !existing.Amount.Equal(p.Amount.Decimal) {
+		if !existing.Amount.Equal(p.Amount) {
 			return insertAmountChange(tx, userID, p.ID, existing.Amount, p.Amount, reason)
 		}
 		return nil
@@ -280,7 +325,7 @@ func (r *Repository) AddProjectAmountChange(userID, projectID int, newAmount mod
 			return err
 		}
 
-		if project.Amount.Equal(newAmount.Decimal) {
+		if project.Amount.Equal(newAmount) {
 			record := model.ProjectAmountChange{
 				ProjectID: projectID,
 				OldAmount: project.Amount,
@@ -347,4 +392,72 @@ func normalizeReason(reason string) string {
 		return "手动调整总金额"
 	}
 	return reason
+}
+
+// SetProjectArchived 归档 / 恢复项目，顺手记一条状态变更。
+//
+// 已经是目标状态就直接返回：重复点「归档」不该在历史里留两条记录。
+func (r *Repository) SetProjectArchived(userID, id int, archived bool) (*model.Project, error) {
+	target := ProjectStatusActive
+	if archived {
+		target = ProjectStatusArchived
+	}
+
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		var project model.Project
+		err := tx.Where("user_id = ? AND id = ?", userID, id).First(&project).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return gorm.ErrRecordNotFound
+		}
+		if err != nil {
+			return err
+		}
+		from := normalizeProjectStatus(project.Status)
+		if from == target {
+			return nil
+		}
+		// updated_at 显式写：单列 Update 不参与 gorm 的自动时间戳，
+		// 不写的话「最近更新」还停在归档之前，归档列表按它排就乱了。
+		if err := tx.Model(&model.Project{}).Where("user_id = ? AND id = ?", userID, id).
+			Updates(map[string]any{"status": target, "updated_at": time.Now()}).Error; err != nil {
+			return err
+		}
+		record := model.ProjectStatusChange{UserID: userID, ProjectID: id, FromStatus: from, ToStatus: target}
+		return tx.Create(&record).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	return r.GetProject(userID, id)
+}
+
+// GetProjectStatusChanges 项目状态变更记录，新的在前
+func (r *Repository) GetProjectStatusChanges(userID, projectID int) ([]model.ProjectStatusChange, error) {
+	changes := []model.ProjectStatusChange{}
+	err := r.db.Where("user_id = ? AND project_id = ?", userID, projectID).
+		Order("created_at DESC, id DESC").Find(&changes).Error
+	if err != nil {
+		return nil, err
+	}
+	return changes, nil
+}
+
+// notArchivedProjectID 拼「这条记录不属于归档项目」的过滤片段，任务 / 统计 / 待收款共用。
+//
+// 走子查询而不是先查一批 id 再 IN：不用为空列表拼出 `IN (NULL)` 这种坑，
+// 也不用担心 id 多了把 SQL 撑长。table 是主表名，得带前缀拼到列名上。
+// 没挂项目的记录照留。
+func (r *Repository) notArchivedProjectID(userID int, table string) (string, []any) {
+	sub := r.db.Model(&model.Project{}).
+		Select("id").
+		Where("user_id = ? AND status = ?", userID, ProjectStatusArchived)
+	return "(" + table + ".project_id IS NULL OR " + table + ".project_id NOT IN (?))",
+		[]any{sub}
+}
+
+func normalizeProjectStatus(status string) string {
+	if status == ProjectStatusArchived {
+		return ProjectStatusArchived
+	}
+	return ProjectStatusActive
 }

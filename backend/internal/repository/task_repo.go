@@ -2,6 +2,7 @@ package repository
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -26,6 +27,12 @@ func (r *Repository) GetTasks(userID int, f model.TaskFilter) ([]model.Task, err
 	if f.ProjectID != nil {
 		query = query.Where("tasks.project_id = ?", *f.ProjectID)
 	}
+	// 归档项目下的任务默认不出现：项目归档的意思就是「这条线的数据别再烦我」。
+	// 按项目筛或显式带上 IncludeArchived 时才查（看单个项目的历史用得上）。
+	if !f.IncludeArchived && f.ProjectID == nil {
+		cond, args := r.notArchivedProjectID(userID, "tasks")
+		query = query.Where(cond, args...)
+	}
 	if f.Scheduled != "" {
 		query = query.Where("tasks.scheduled_date = ?", f.Scheduled)
 	}
@@ -35,7 +42,17 @@ func (r *Repository) GetTasks(userID int, f model.TaskFilter) ([]model.Task, err
 			f.StartDate, f.EndDate)
 	}
 	if f.TodayOnly {
-		query = query.Where("tasks.is_today = ?", true)
+		if f.Today == "" {
+			f.Today = model.TodayIn(r.timezoneOf(userID))
+		}
+		// "!" 打头表示「今天不算」。「今天该做」那半截的取反，加上「今天完成」那半截不动：
+		// 今天刚勾掉的既不是今天的活，也不该掉进「已过期 / 未开始」。
+		today := strings.TrimPrefix(f.Today, "!")
+		negate := strings.HasPrefix(f.Today, "!")
+		if !negate {
+			cond, args := r.todayCond(r.db.Dialector.Name(), r.timezoneOf(userID), today)
+			query = query.Where(cond, args...)
+		}
 	}
 	if f.Keyword != "" {
 		kw := "%" + f.Keyword + "%"
@@ -58,12 +75,33 @@ func (r *Repository) GetTasks(userID int, f model.TaskFilter) ([]model.Task, err
 	if err := query.Find(&tasks).Error; err != nil {
 		return nil, err
 	}
+	// 没排期的任务「开始时间」看创建日期，这一步只有 Go 时间能算（见 model.TodayCondition 的注释）。
+	// 正向这边 SQL 已经把排期、截止、状态筛过一遍，这里只补这一个条件；
+	// 取反那边 SQL 什么都没筛，全靠这儿挑。
+	if f.TodayOnly {
+		timezone := r.timezoneOf(userID)
+		today := strings.TrimPrefix(f.Today, "!")
+		negate := strings.HasPrefix(f.Today, "!")
+		kept := make([]model.Task, 0, len(tasks))
+		for _, t := range tasks {
+			// 「今天完成的」只算今天的活，不落进「已过期 / 未开始」那一栏：
+			// 取反那半边写严格点——不在今天，才进那一栏
+			isToday := model.FinishedOn(t, timezone, today) ||
+				(model.NotDoneAndOpen(t, today) && model.HasWindow(t) && model.IsStarted(t, today))
+			if isToday != negate {
+				kept = append(kept, t)
+			}
+		}
+		tasks = kept
+	}
 	if err := r.attachLabels(userID, tasks); err != nil {
 		return nil, err
 	}
 	if err := r.attachProjectNames(userID, tasks); err != nil {
 		return nil, err
 	}
+	// 顺手把「算不算今天」标上：列表里一行就能看出今天该做哪些，前端不用自己再算一遍日期
+	r.markToday(userID, tasks)
 	return tasks, nil
 }
 
@@ -84,7 +122,51 @@ func (r *Repository) GetTask(userID, id int) (*model.Task, error) {
 	if err := r.attachProjectNames(userID, tasks); err != nil {
 		return nil, err
 	}
+	r.markToday(userID, tasks)
 	return &tasks[0], nil
+}
+
+// markToday 给查出来的任务打上「算不算今天的今日任务」。
+//
+// 判定还是那一条 SQL（model.TodayCondition），不在这儿另写一份规则 ——
+// 两处各写一份迟早对不上，列表和统计就又开始打架了。
+// 唯一的例外是「没排期就看创建日期」：日期列的方言差异只能交给 Go 补，
+// 所以 SQL 筛过之后再拿 model.IsStarted 收一遍。
+func (r *Repository) markToday(userID int, tasks []model.Task) {
+	if len(tasks) == 0 {
+		return
+	}
+	ids := make([]int, 0, len(tasks))
+	for _, t := range tasks {
+		ids = append(ids, t.ID)
+	}
+	timezone := r.timezoneOf(userID)
+	todayDate := model.TodayIn(timezone)
+	cond, args := r.todayCond(r.db.Dialector.Name(), timezone, todayDate)
+	var candidates []model.Task
+	if err := r.db.Model(&model.Task{}).
+		Where("user_id = ? AND id IN ?", userID, ids).
+		Where(cond, args...).
+		Select("id", "status", "scheduled_date", "due_date", "created_at").
+		Find(&candidates).Error; err != nil {
+		return
+	}
+	set := make(map[int]bool, len(candidates))
+	for _, t := range candidates {
+		// 没排期的要看创建日期，这一步 SQL 算不了，交给 IsStarted；
+		// 今天完成的不受这条约束
+		if t.Status != "DONE" && (!model.HasWindow(t) || !model.IsStarted(t, todayDate)) {
+			continue
+		}
+		set[t.ID] = true
+	}
+	for i := range tasks {
+		today := set[tasks[i].ID]
+		if tasks[i].Status != "DONE" {
+			today = today && model.HasWindow(tasks[i]) && model.IsStarted(tasks[i], todayDate)
+		}
+		tasks[i].TodayFlag = today
+	}
 }
 
 // attachLabels 一次查出这批任务的标签，别在循环里逐条查。
@@ -210,7 +292,36 @@ func (r *Repository) UpdateTask(userID int, t *model.Task) error {
 	labels := t.Labels
 	t.Labels = nil
 
+	// 提前收工：原计划是往后的日子，今天却做完了。
+	// 把开始日期落到今天，否则这条「今天该做的」不算今天的活——它还没开始就被做完了，
+	// 今日统计里也该有它一条（状态是已完成就是了）。
+	startOnToday := false
+	if t.Status == "DONE" {
+		var current model.Task
+		if err := r.db.Model(&model.Task{}).
+			Where("user_id = ? AND id = ?", userID, t.ID).
+			Select("status", "created_at").First(&current).Error; err == nil && current.Status != "DONE" {
+			scheduled := t.ScheduledDate
+			if scheduled == nil || strings.TrimSpace(*scheduled) == "" {
+				created := current.CreatedAt.Format("2006-01-02")
+				scheduled = &created
+			}
+			if today := r.TodayFor(userID); *scheduled > today {
+				t.ScheduledDate = &today
+				startOnToday = true
+			}
+		}
+	}
+
 	err := r.db.Transaction(func(tx *gorm.DB) error {
+		if startOnToday {
+			// 开始日期改成今天这一步不能丢：Select 会把零值字段跳过，得单独补一次
+			if err := tx.Model(&model.Task{}).
+				Where("user_id = ? AND id = ?", userID, t.ID).
+				Update("scheduled_date", *t.ScheduledDate).Error; err != nil {
+				return err
+			}
+		}
 		res := tx.Model(&model.Task{}).
 			Where("user_id = ? AND id = ?", userID, t.ID).
 			Select("title", "content", "category", "status", "opportunity_status", "priority",
@@ -312,9 +423,16 @@ func (r *Repository) GetTaskStats(userID int) (*model.TaskStats, error) {
 		Name  string
 		Total int
 	}
+	// 归档项目的任务不进任何统计：首页的分类、状态计数都不该再被旧项目撑着。
+	// gorm 的链式条件会互相污染，所以每回都从一条干净查询起头。
+	cond, args := r.notArchivedProjectID(userID, "tasks")
+	visible := func() *gorm.DB {
+		return r.db.Model(&model.Task{}).Where("user_id = ?", userID).Where(cond, args...)
+	}
+
 	var byCategory []groupCount
-	if err := r.db.Model(&model.Task{}).Where("user_id = ?", userID).
-		Select("category AS name, COUNT(*) AS total").Group("category").Scan(&byCategory).Error; err != nil {
+	if err := visible().Select("category AS name, COUNT(*) AS total").
+		Group("category").Scan(&byCategory).Error; err != nil {
 		return nil, err
 	}
 	for _, g := range byCategory {
@@ -322,8 +440,8 @@ func (r *Repository) GetTaskStats(userID int) (*model.TaskStats, error) {
 	}
 
 	var byStatus []groupCount
-	if err := r.db.Model(&model.Task{}).Where("user_id = ?", userID).
-		Select("status AS name, COUNT(*) AS total").Group("status").Scan(&byStatus).Error; err != nil {
+	if err := visible().Select("status AS name, COUNT(*) AS total").
+		Group("status").Scan(&byStatus).Error; err != nil {
 		return nil, err
 	}
 	for _, g := range byStatus {
@@ -336,15 +454,36 @@ func (r *Repository) GetTaskStats(userID int) (*model.TaskStats, error) {
 		EstimatedH float64
 		ActualH    float64
 	}
-	if err := r.db.Model(&model.Task{}).
-		Where("user_id = ? AND is_today = ?", userID, true).
-		Select(`COUNT(*) AS total,
-			COALESCE(SUM(CASE WHEN status = 'DONE' THEN 1 ELSE 0 END), 0) AS done,
-			COALESCE(SUM(estimated_hours), 0) AS estimated_h,
-			COALESCE(SUM(actual_hours), 0) AS actual_h`).
-		Scan(&today).Error; err != nil {
+	// 今日口径：今天该做的（没完成 + 今天落在开始与结束时间之间），加上今天完成的。
+	// 不再看 is_today（那只是手动钉住），也不再是「加进过今日的都算」。
+	timezone := r.timezoneOf(userID)
+	todayDate := model.TodayIn(timezone)
+	// 跟列表走同一套口径：SQL 筛日期列（含今天完成那条），Go 补「没排期的看创建日期」。
+	// 统计要的是合计，没法只挑几行，索性把候选行捞回来在 Go 里累加 ——
+	// 今日任务本来也就几十条，比在 SQL 里拼方言函数稳。
+	// 前面几条统计已经把 cond/args 占住了，这里另起一份，别把归档条件和今日条件串在一起
+	todayCond, todayArgs := r.todayCond(r.db.Dialector.Name(), timezone, todayDate)
+	var candidates []model.Task
+	if err := visible().Where(todayCond, todayArgs...).
+		Select("id", "status", "scheduled_date", "due_date", "created_at",
+			"estimated_hours", "actual_hours").
+		Find(&candidates).Error; err != nil {
 		return nil, err
 	}
+	for _, task := range candidates {
+		// 今天完成的不用再过这两关：它已经干完了
+		if task.Status != "DONE" && (!model.HasWindow(task) || !model.IsStarted(task, todayDate)) {
+			continue
+		}
+		today.Total++
+		if task.Status == "DONE" {
+			today.Done++
+		}
+		today.EstimatedH += task.EstimatedHours
+		today.ActualH += task.ActualHours
+	}
+	stats.TodayDate = todayDate
+	stats.Timezone = model.NormalizeTimezone(r.timezoneOf(userID))
 	stats.TodayTotal = today.Total
 	stats.TodayDone = today.Done
 	stats.TodayEstimatedHours = today.EstimatedH
@@ -456,4 +595,15 @@ func normalizeTask(t *model.Task) {
 	} else {
 		t.ClosedAt = nil
 	}
+}
+
+// todayCond 拼好 model.TodayCondition（按方言填完成时间那段），再补齐参数。
+// Postgres 那段要先把完成时间挪进用户时区，所以多一个时区参数；
+// 判定「今天完成的」也得挪，否则东八区早上八点前勾掉的事会被算成昨天。
+func (r *Repository) todayCond(driver, timezone, today string) (string, []any) {
+	args := []any{today, today}
+	if driver == Postgres {
+		args = append(args, model.NormalizeTimezone(timezone))
+	}
+	return fmt.Sprintf(model.TodayCondition, model.ClosedAtExpr(driver)), append(args, today)
 }

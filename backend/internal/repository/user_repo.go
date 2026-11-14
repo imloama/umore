@@ -75,9 +75,34 @@ func (r *Repository) CreateUser(email, passwordHash, passwordSalt string, verifi
 	return user, nil
 }
 
-// UpdateProfile 改昵称与头像；userID 来自登录态，只能改自己那条
-func (r *Repository) UpdateProfile(userID int, nickname, avatar string) error {
-	return r.updateUser(userID, map[string]any{"nickname": nickname, "avatar": avatar})
+// UpdateProfile 改昵称、头像与时区；userID 来自登录态，只能改自己那条
+func (r *Repository) UpdateProfile(userID int, nickname, avatar, timezone string) error {
+	return r.updateUser(userID, map[string]any{
+		"nickname": nickname,
+		"avatar":   avatar,
+		"timezone": model.NormalizeTimezone(timezone),
+	})
+}
+
+// timezoneOf 该用户的时区名，没设置过的（老账号）按默认 UTC+8。
+// 取不到账号也不该让页面报错：退回默认值，业务照常。
+func (r *Repository) timezoneOf(userID int) string {
+	var timezone string
+	if err := r.db.Model(&model.User{}).Where("id = ?", userID).
+		Select("timezone").Scan(&timezone).Error; err != nil {
+		return model.DefaultTimezone
+	}
+	return model.NormalizeTimezone(timezone)
+}
+
+// TimezoneFor 该用户设置生效后的时区名（空值、认不出来的都已经换成默认值）
+func (r *Repository) TimezoneFor(userID int) string {
+	return model.NormalizeTimezone(r.timezoneOf(userID))
+}
+
+// TodayFor 该用户所处时区的今天（YYYY-MM-DD）。今日视图、今日统计都以它为准。
+func (r *Repository) TodayFor(userID int) string {
+	return model.TodayIn(r.timezoneOf(userID))
 }
 
 // SetAvatar 只换头像，昵称不动（上传头像后单独落一次地址）
@@ -107,6 +132,13 @@ func (r *Repository) UpdatePassword(userID int, passwordHash, passwordSalt strin
 		return gorm.ErrRecordNotFound
 	}
 	return nil
+}
+
+// BackfillTimezones 老账号没有时区，按默认 UTC+8 补上：今日任务从哪天算不能有第三种答案
+func (r *Repository) BackfillTimezones() error {
+	return r.db.Model(&model.User{}).
+		Where("timezone = ? OR timezone IS NULL", "").
+		Update("timezone", model.DefaultTimezone).Error
 }
 
 // BackfillNicknames 老账号没有昵称，按 MORE+ID 补一条，别让界面显示空白

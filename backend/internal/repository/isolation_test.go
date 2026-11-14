@@ -43,7 +43,7 @@ func TestUserIsolation(t *testing.T) {
 		}
 
 		// Bob 一个都看不见
-		if list, _ := repo.GetProjects(bob); len(list) != 0 {
+		if list, _ := repo.GetProjects(bob, ""); len(list) != 0 {
 			t.Fatalf("B 不该看到 A 的项目: %+v", list)
 		}
 		if list, _ := repo.GetTasks(bob, model.TaskFilter{}); len(list) != 0 {
@@ -55,7 +55,7 @@ func TestUserIsolation(t *testing.T) {
 		if list, _ := repo.GetFinances(bob, "2000-01-01", "2099-01-01"); len(list) != 0 {
 			t.Fatalf("B 不该看到 A 的流水: %+v", list)
 		}
-		if list, _ := repo.GetReceivables(bob, "", 0); len(list) != 0 {
+		if list, _ := repo.GetReceivables(bob, "", 0, false); len(list) != 0 {
 			t.Fatalf("B 不该看到 A 的待收款: %+v", list)
 		}
 		if list, _ := repo.GetIdeas(bob, ""); len(list) != 0 {

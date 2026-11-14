@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ArrowDownRight, ArrowUpRight, Plus, Trash, Wallet } from 'lucide-react'
+import { Archive, ArchiveRestore, ArrowDownRight, ArrowUpRight, Plus, Trash, Wallet } from 'lucide-react'
 import { projectApi, receivableApi } from '../services/api'
 import type { Project, ProjectAmountChange, Receivable, TaskComment } from '../types'
 import RichText from './RichText'
@@ -100,6 +100,24 @@ export default function ProjectDetail({
       setFresh(await projectApi.get(project.id))
     } catch (err) {
       console.error('Failed to reload project:', err)
+    }
+  }
+
+  // 归档 / 恢复就在详情里做：看一眼这条线做完了，直接收起来，不用回列表
+  const toggleArchive = async (target: Project) => {
+    if (!target.id) return
+    const archived = target.status !== 'archived'
+    if (archived && !confirm(t('project.confirmArchive', { name: target.name }))) return
+    setSaving(true)
+    try {
+      await projectApi.setArchived(target.id, archived)
+      setFresh(await projectApi.get(target.id))
+      onChanged?.()
+    } catch (err) {
+      console.error('Failed to archive project:', err)
+      setError(t('project.detail.saveFailed'))
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -204,7 +222,17 @@ export default function ProjectDetail({
         )
       }
       description={project?.description || t('project.detail.description')}
-      footer={<Button variant="outline" onClick={onClose}>{t('common.close')}</Button>}
+      footer={
+        <>
+          {project && (
+            <Button variant="outline" onClick={() => toggleArchive(project)} disabled={saving}>
+              {project.status === 'archived' ? <ArchiveRestore /> : <Archive />}
+              {project.status === 'archived' ? t('project.restore') : t('project.archive')}
+            </Button>
+          )}
+          <Button variant="outline" onClick={onClose}>{t('common.close')}</Button>
+        </>
+      }
     >
       {project && (
         <Tabs value={tab} onValueChange={setTab}>
@@ -434,7 +462,8 @@ export default function ProjectDetail({
               <p className="text-xs text-muted-foreground">{t('project.detail.noRecords')}</p>
             )}
 
-            <ul className="space-y-2.5">
+            {/* data-image-gallery：项目记录里的图片一起翻，不用一条一条点 */}
+            <ul className="space-y-2.5" data-image-gallery>
               {comments.map((comment, index) => (
                 <li key={comment.id ?? index} className="flex gap-2.5 rounded-lg border border-border px-3 py-2.5">
                   <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-accent text-[10px] font-semibold text-accent-foreground">

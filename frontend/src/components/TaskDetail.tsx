@@ -137,7 +137,8 @@ export default function TaskDetail({
       }
     >
       {task && (
-        <div className="space-y-4">
+        <div className="space-y-4" data-image-gallery>
+          {/* data-image-gallery：正文和评论里的图片算一个画廊，点开任意一张能从头翻到尾 */}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
             <span>
               {t('task.detail.priority')}

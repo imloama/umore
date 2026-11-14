@@ -46,6 +46,7 @@ export default function Receivables() {
   const load = async () => {
     try {
       const [list, sum, projectList] = await Promise.all([
+        // 归档项目的账不再催，所以收款计划也带 include_archived=0 的默认口径
         receivableApi.list(),
         receivableApi.summary(),
         projectApi.list()

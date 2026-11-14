@@ -23,8 +23,8 @@ cp -R "$FRONTEND/dist/." "$BACKEND/web/"
 
 echo "==> build backend"
 cd "$BACKEND"
-CGO_ENABLED=0 go build -trimpath -o umore ./cmd/server
-CGO_ENABLED=0 go build -trimpath -o umore-migrate ./cmd/migrate
+GOOS=linux CGO_ENABLED=0 go build -trimpath -o umore ./cmd/server
+GOOS=linux CGO_ENABLED=0 go build -trimpath -o umore-migrate ./cmd/migrate
 
 echo "==> done"
 ls -lh "$BACKEND/umore" "$BACKEND/umore-migrate"

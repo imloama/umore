@@ -1,6 +1,10 @@
 package repository
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/imloama/umore/internal/model"
+)
 
 // 账号：建、按邮箱查大小写不敏感、重复邮箱被挡
 func TestUserRepo(t *testing.T) {
@@ -29,5 +33,20 @@ func TestUserRepo(t *testing.T) {
 
 	if _, err := repo.GetUserByEmail("nobody@example.com"); err != nil {
 		t.Fatalf("查不存在的邮箱不该报错: %v", err)
+	}
+}
+
+// 迁移补时区：直接写空的进去，BackfillTimezones 之后回到默认值
+func TestBackfillTimezones(t *testing.T) {
+	repo := newTestRepo(t)
+	uid := newUser(t, repo, "tz-backfill@example.com")
+	if err := repo.db.Model(&model.User{}).Where("id = ?", uid).Update("timezone", "").Error; err != nil {
+		t.Fatalf("clear timezone: %v", err)
+	}
+	if err := repo.BackfillTimezones(); err != nil {
+		t.Fatalf("backfill: %v", err)
+	}
+	if got := repo.TimezoneFor(uid); got != model.DefaultTimezone {
+		t.Fatalf("补完之后应为 %s，实际 %s", model.DefaultTimezone, got)
 	}
 }

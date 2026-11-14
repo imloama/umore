@@ -49,10 +49,11 @@ func optionalDate(v string) *string {
 	return &v
 }
 
-// GetAll GET /api/receivables?status=pending&project_id=1
+// GetAll GET /api/receivables?status=pending&project_id=1&include_archived=1
 func (h *ReceivableHandler) GetAll(c *gin.Context) {
 	projectID, _ := strconv.Atoi(c.Query("project_id"))
-	list, err := h.Repo.GetReceivables(userID(c), c.Query("status"), projectID)
+	includeArchived := c.Query("include_archived") == "1" || c.Query("include_archived") == "true"
+	list, err := h.Repo.GetReceivables(userID(c), c.Query("status"), projectID, includeArchived)
 	if err != nil {
 		respondError(c, err)
 		return

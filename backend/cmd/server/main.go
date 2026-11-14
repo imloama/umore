@@ -129,6 +129,7 @@ func main() {
 			authGroup.PUT("/profile", handler.RequireAuth(sessions), authHandler.UpdateProfile)
 			authGroup.POST("/password", handler.RequireAuth(sessions), authHandler.ChangePassword)
 			authGroup.POST("/avatar", handler.RequireAuth(sessions), authHandler.UploadAvatar)
+			authGroup.GET("/timezones", authHandler.Timezones)
 		}
 
 		// 从这里往下都要登录：token 由 /auth/login 或 /auth/register 签发
@@ -145,6 +146,8 @@ func main() {
 			projects.DELETE("/:id", projectHandler.Delete)
 			projects.GET("/:id/amount-changes", projectHandler.GetAmountChanges)
 			projects.POST("/:id/amount-changes", projectHandler.AddAmountChange)
+			projects.PUT("/:id/archive", projectHandler.SetArchived)
+			projects.GET("/:id/status-changes", projectHandler.GetStatusChanges)
 			projects.GET("/:id/comments", projectHandler.GetComments)
 			projects.POST("/:id/comments", projectHandler.AddComment)
 		}
@@ -175,6 +178,7 @@ func main() {
 		{
 			tasks.GET("", taskHandler.GetAll)
 			tasks.GET("/stats", taskHandler.Stats)
+			tasks.GET("/today", taskHandler.Today)
 			tasks.PUT("/reorder", taskHandler.ReorderToday)
 			tasks.DELETE("/comments/:id", taskHandler.DeleteComment)
 			tasks.GET("/:id", taskHandler.GetOne)

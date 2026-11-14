@@ -70,6 +70,7 @@ export default function TaskRow({
             <i className={cn('size-1.5 rounded-full', task.priority === 'MEDIUM' ? 'bg-amber-500' : 'bg-current')} />
             {t(PRIORITY_KEYS[task.priority])}
           </span>
+          {/* 钉住 ≠ 今天该做：徽标只标「手动钉住」，今日的两栏由列表本身分好 */}
           {task.is_today && <Badge variant="success">{t('taskRow.todayBadge')}</Badge>}
         </div>
 

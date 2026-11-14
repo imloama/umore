@@ -7,6 +7,15 @@ export interface AuthUser {
   nickname: string
   /** 头像地址（/uploads/avatars/xxx.png），空着就显示昵称首字母 */
   avatar?: string
+  /** 时区名（IANA，如 Asia/Shanghai）。「今天」按这个时区的 0 点切，默认 UTC+8 */
+  timezone?: string
+}
+
+/** 用户时区里的「今天」：日期串 + 生效的时区名 */
+export interface TodayInfo {
+  /** YYYY-MM-DD */
+  today: string
+  timezone: string
 }
 
 /** 发验证码的返回：前端靠它设倒计时与输入框长度 */
@@ -63,8 +72,19 @@ export interface Project {
   next_due_date?: string
   amount_change_count?: number
   amount_changed_at?: string
+  /** 只读：归档时间。归档的项目相关数据默认不再出现在日常视图里 */
+  archived_at?: string
   created_at?: string
   updated_at?: string
+}
+
+/** 项目状态变更记录：归档 / 恢复各记一条 */
+export interface ProjectStatusChange {
+  id?: number
+  project_id?: number
+  from: 'active' | 'archived'
+  to: 'active' | 'archived'
+  created_at?: string
 }
 
 export interface ProjectAmountChange {
@@ -147,8 +167,11 @@ export interface Task {
   estimated_hours?: number
   /** 实际用时（小时），手动填写 */
   actual_hours?: number
+  /** 手动钉在今日（一直排进今日列表，直到手动移出）；它不影响今日统计 */
   is_today?: boolean
   today_order?: number
+  /** 只读：按用户时区的今天算，这条是不是「今日任务」（没完成 + 今天在开始与结束之间） */
+  today?: boolean
   closed_at?: string
   created_at?: string
   updated_at?: string
@@ -161,6 +184,10 @@ export interface TaskStats {
   today_done: number
   today_estimated_hours: number
   today_actual_hours: number
+  /** 这次统计按哪天算（用户时区的今天） */
+  today_date: string
+  /** 这次统计用的时区 */
+  timezone: string
 }
 
 export interface Attachment {
@@ -180,9 +207,13 @@ export interface TaskFilter {
   label?: string
   keyword?: string
   today?: boolean
+  /** 指定「按哪天算今日」；'!2026-01-01' 表示取反（今日页的已过期 / 未开始） */
+  today_date?: string
   date?: string
   start_date?: string
   end_date?: string
+  /** 归档项目下的任务默认不查，显式打开才带上 */
+  include_archived?: boolean
 }
 
 export interface Issue {

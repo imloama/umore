@@ -19,8 +19,10 @@ type projectPayload struct {
 	AmountChangeReason string `json:"amount_change_reason"`
 }
 
+// GetAll GET /api/projects?status=archived
+// status 为空回全部（含归档），给 archived 只回归档的——归档入口就是靠它。
 func (h *ProjectHandler) GetAll(c *gin.Context) {
-	projects, err := h.Repo.GetProjects(userID(c))
+	projects, err := h.Repo.GetProjects(userID(c), c.Query("status"))
 	if err != nil {
 		respondError(c, err)
 		return
@@ -51,6 +53,8 @@ func (h *ProjectHandler) Create(c *gin.Context) {
 		return
 	}
 	project := payload.Project
+	// 新建的项目一律活跃：归档是后面的事，有专门入口
+	project.Status = ""
 
 	if err := h.Repo.CreateProject(userID(c), &project); err != nil {
 		respondError(c, err)
@@ -83,6 +87,8 @@ func (h *ProjectHandler) Update(c *gin.Context) {
 	}
 	project := payload.Project
 	project.ID = id
+	// 状态不跟着编辑表单走：归档 / 恢复有专门接口，免得旧表单把归档状态改回去
+	project.Status = existing.Status
 
 	if err := h.Repo.UpdateProject(userID(c), &project, payload.AmountChangeReason); err != nil {
 		respondError(c, err)
@@ -205,4 +211,47 @@ func (h *ProjectHandler) AddComment(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusCreated, comment)
+}
+
+// SetArchived PUT /api/projects/:id/archive {archived: true}
+// 归档后这个项目相关的数据（任务、看板、回款）默认都不再出现在日常视图里。
+func (h *ProjectHandler) SetArchived(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		fail(c, http.StatusBadRequest, codeInvalidID, "invalid id")
+		return
+	}
+	var req struct {
+		Archived bool `json:"archived"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, http.StatusBadRequest, codeInvalidParams, err.Error())
+		return
+	}
+
+	project, err := h.Repo.SetProjectArchived(userID(c), id, req.Archived)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	if project == nil {
+		fail(c, http.StatusNotFound, codeProjectNotFound, "project not found")
+		return
+	}
+	c.JSON(http.StatusOK, project)
+}
+
+// GetStatusChanges GET /api/projects/:id/status-changes
+func (h *ProjectHandler) GetStatusChanges(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		fail(c, http.StatusBadRequest, codeInvalidID, "invalid id")
+		return
+	}
+	changes, err := h.Repo.GetProjectStatusChanges(userID(c), id)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, changes)
 }
